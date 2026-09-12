@@ -103,6 +103,34 @@ The backend is bound to `127.0.0.1:3001` and PostgreSQL to `127.0.0.1:5433`. The
 
 `DATABASE_URL` is required and must be a PostgreSQL connection URL. All supported variables are documented in `.env.example`. Real `.env` files and credentials must never be committed.
 
+## Narrative Engine (Phase 1)
+
+The deterministic narrative domain module lives in `backend/src/domain/narrative/`. It is pure TypeScript with no Fastify, PostgreSQL, Drizzle, React, browser, or AI provider dependencies.
+
+It provides validated world state, data-defined conditions and storylets, deterministic eligibility resolution, atomic effects, transition records, terminal detection, and a maximum-transition guard.
+
+The canonical fixture is SSH Brute Force (`T1110.001`) with three paths:
+
+- External source: triage, simulated perimeter block, close.
+- Protected internal source: triage, SOC escalation, safe containment, close.
+- SOC escalation: protected internal triage, explicit escalation outcome, follow-up, terminal close.
+
+Outcome selection is explicit and deterministic. The engine does not perform AI inference, policy arbitration, persistence, or REST exposure.
+
+### Storylet to graph node mapping
+
+This mapping is documentation only; the domain module never imports frontend or Three.js code.
+
+| Storylet | Graph node |
+| --- | --- |
+| `triage-ssh-brute-force` | `N-01` Receive alert |
+| `block-external-source` | `N-04` Contain endpoint |
+| `escalate-protected-source` | `N-04` Contain endpoint |
+| `soc-escalation-follow-up` | `N-04` Contain endpoint |
+| `close-ssh-incident` | `N-05` Review & report |
+
+`N-02` Enrich context and `N-03` Assess threat remain contextual nodes without dedicated storylets in this fixture. Frontend integration is deferred to a later phase.
+
 ### Current scope
 
-Narrative Engine, simulation runs, audit events, and evaluation tables remain planned for their appropriate phases. Phase 1 has not been implemented.
+Phase 0 infrastructure and the Phase 1 Narrative Engine core are implemented. Simulation REST endpoints, run persistence, Referee Engine integration, AI inference, and evaluation reporting remain planned for later phases.
