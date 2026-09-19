@@ -34,7 +34,7 @@ Browser acceptance tests: install a Playwright browser with `npx playwright inst
 
 The current demo has no failure/interception outcomes. `NODE_FAILED` and `NODE_INTERCEPTED` have distinct caution cues in the engine, but are not emitted by this successful illustrative sequence. Completion tones mean local demonstration progression, never security validation.
 
-**All execution states are simulated.** No LLM, security evaluation, or SOAR integration is present, and the frontend is not connected to the backend yet. See `SPEC.md` for the provisional contract and data boundaries. The original repository and reference screenshots were not available.
+**All frontend execution states are simulated.** The frontend has no LLM, backend policy evaluation, or SOAR integration and is not connected to the backend yet. The Phase 2 backend evaluates deterministic scenario fixtures separately. See `SPEC.md` for the provisional frontend contract and data boundaries. The original repository and reference screenshots were not available.
 
 ## Repository layout
 
@@ -95,7 +95,7 @@ The backend is bound to `127.0.0.1:3001` and PostgreSQL to `127.0.0.1:5433`. The
 | `npm run build` | Compile TypeScript to `dist/` |
 | `npm run start` | Run the compiled API |
 | `npm run typecheck` | Type-check without emitting |
-| `npm run test` | Run Vitest (test infrastructure ready) |
+| `npm run test` | Run backend unit and integration tests with Vitest |
 | `npm run db:generate` | Generate a Drizzle migration from the schema |
 | `npm run db:migrate` | Apply pending Drizzle migrations |
 
@@ -131,6 +131,91 @@ This mapping is documentation only; the domain module never imports frontend or 
 
 `N-02` Enrich context and `N-03` Assess threat remain contextual nodes without dedicated storylets in this fixture. Frontend integration is deferred to a later phase.
 
+## Simulation Orchestrator and Referee Engine (Phase 2)
+
+`backend/src/domain/simulation/` runs the Phase 1 Narrative Engine in memory. `backend/src/domain/referee/` evaluates proposed decisions against a versioned policy set before any narrative effects are applied. Both modules are independent of Fastify, PostgreSQL, React, and external AI services.
+
+The execution sequence is: resolve an eligible storylet → request a decision → validate its schema → evaluate referee policies → apply an approved outcome atomically → record the decision, verdict, and transition → evaluate the finished run.
+
+### In-process usage
+
+From a TypeScript module in `backend/`:
+
+```ts
+import {
+  sshBruteForceInitialStates,
+  sshBruteForceScenario,
+} from './src/domain/narrative/index.js';
+import {
+  createExternalSourceProvider,
+  InMemorySimulationOrchestrator,
+} from './src/domain/simulation/index.js';
+
+const orchestrator = new InMemorySimulationOrchestrator();
+const run = orchestrator.createRun({
+  scenario: sshBruteForceScenario,
+  initialState: sshBruteForceInitialStates.externalSource,
+  provider: createExternalSourceProvider(),
+});
+const result = await orchestrator.startRun(run.runId);
+console.log(result.status, result.evaluation?.outcome);
+```
+
+This fixture produces `COMPLETED PASS`. `createProtectedInternalProvider()` supplies the four-decision SOC path. `createUnsafeProtectedBlockProvider()` attempts a direct block after protected-source triage and produces `COMPLETED FAIL` with the rejected action's effects unapplied.
+
+### Lifecycle and provider contract
+
+The public orchestrator API is `createRun`, `startRun`, `pauseRun`, `resumeRun`, `cancelRun`, `getRunSnapshot`, `getRunRecords`, `getRunEvaluation`, and `listRuns`.
+
+- A run starts as `CREATED`. Start changes it to `RUNNING`; pause changes `RUNNING` to `PAUSED`; resume starts a new execution generation. Start/resume return promises resolving to the latest snapshot when their execution generation stops.
+- Cancellation is available from `CREATED`, `RUNNING`, or `PAUSED`. `COMPLETED`, `FAILED`, and `CANCELLED` are final; invalid lifecycle operations raise structured errors.
+- `DecisionProvider.decide(context)` may return a decision synchronously or asynchronously. Context contains the run ID, sequence, frozen scenario/state, selected and eligible storylets, prior records, and an `AbortSignal`.
+- Pausing discards the in-flight response. Resume requests the same uncommitted decision sequence again. Cancellation and timeout abort the signal; responses arriving afterward cannot change state or records. Scripted providers index their script by `context.sequence`, so sharing a fixture provider across runs does not consume another run's decisions.
+- The default provider timeout is 1,000ms. `decisionTimeoutMs` and `maxDecisions` are configurable per run; the decision limit is capped by the scenario's `maxTransitions`.
+- Scenarios, world state, policy definitions, records, and snapshots are copied/frozen at their boundaries. Runs have isolated mutable runtime state. An injected clock and `runIdFactory` allow deterministic replay including timestamps and identifiers.
+
+### Decisions, policies, and graph mapping
+
+A `ProposedDecision` contains `decisionId`, `providerId`, `actionType`, `storyletId`, `outcomeId`, optional `parameters` (`sourceId`/`incidentId`), and optional `reasoning`. Parameters are audit identifiers for the simulated action; no network/security command is executed.
+
+The default policy set is `4sight-default-referee`, version `1.0.0`:
+
+| Policy | Check |
+| --- | --- |
+| `POLICY-001` | Authorize perimeter blocking for an unprotected external source after triage |
+| `POLICY-002` | Prohibit perimeter blocking of internal or protected sources/assets |
+| `POLICY-003` | Authorize the protected/internal SOC escalation path |
+| `POLICY-004` | Require safe state preconditions for the proposed action |
+| `POLICY-005` | Authorize triage of a detected incident above the confidence threshold |
+| `POLICY-006` | Require a requested escalation before SOC acknowledgement |
+| `POLICY-007` | Require containment before incident closure |
+| `POLICY-008` | Bind the decision to the deterministically selected storylet, action, and defined outcome |
+
+The referee reports `APPROVED` or `REJECTED`, policy-set/version information, evaluated and violated policies, reason codes, and evidence. It does not mutate caller-owned world state. Binding is mandatory even for custom policy sets; an action without any applicable authorizing policy is rejected. Malformed policy findings cause a structured evaluation error.
+
+| Storylet | Action type | Outcome | Graph node |
+| --- | --- | --- | --- |
+| `triage-ssh-brute-force` | `triage_alert` | `confirm-threat` | `N-01` |
+| `block-external-source` | `perimeter_block` | `block-applied` | `N-04` |
+| `escalate-protected-source` | `soc_escalation` | `soc-escalated` | `N-04` |
+| `soc-escalation-follow-up` | `soc_acknowledgement` | `soc-contained` | `N-04` |
+| `close-ssh-incident` | `incident_closure` | `incident-resolved` | `N-05` |
+
+Each `SimulationRecord` joins an evaluated decision to its referee result and optional Phase 1 `TransitionRecord`. The transition carries the graph node, applied effects, and previous/next narrative state versions. Rejected decisions and approved-but-failed transitions have `transition: null`; only successful transitions increment narrative state versions. Invalid provider output or provider/referee faults produce an error rather than an invented verdict record.
+
+### Evaluation semantics
+
+| Run condition | Final status | Evaluation |
+| --- | --- | --- |
+| Approved decisions reach the narrative terminal state | `COMPLETED` | `PASS` |
+| Referee rejects a decision | `COMPLETED` | `FAIL` |
+| Provider/schema/referee/transition error, timeout, dead end, or decision limit | `FAILED` | `INCONCLUSIVE` |
+| Run cancelled | `CANCELLED` | `INCONCLUSIVE` |
+
+A referee rejection ends the run because this fixture has no rejection-recovery storylet. Evaluation counts come from actual records: total, approved and rejected decisions, policy violations, final world state/version, terminal flag, and start/completion timestamps. An unfinished run has no evaluation. No placeholder model-quality or hallucination metrics are generated.
+
+Run `npm run typecheck`, `npm run build`, and `npm test` in `backend/` to verify the modules. Tests cover both successful paths, protected-source rejection, malformed/failing/timed-out providers, dead ends, transition rollback, decision limits, lifecycle controls, stale responses, concurrent run isolation, immutable boundaries, and deterministic replay.
+
 ### Current scope
 
-Phase 0 infrastructure and the Phase 1 Narrative Engine core are implemented. Simulation REST endpoints, run persistence, Referee Engine integration, AI inference, and evaluation reporting remain planned for later phases.
+Phase 0 infrastructure, the Phase 1 Narrative Engine, and the Phase 2 in-memory orchestrator, referee, and evaluation are implemented. Simulation REST/SSE endpoints, run persistence, live AI inference, SOAR execution, and frontend integration are planned for later phases.
