@@ -1,0 +1,131 @@
+import { timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
+import { Type } from '@sinclair/typebox';
+import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
+import { ApplicationError } from '../application/simulation/contracts.js';
+import type { SimulationService } from '../application/simulation/simulation-service.js';
+import { EventStream } from '../infrastructure/streaming/event-stream.js';
+import { sshBruteForceScenario } from '../domain/narrative/scenarios/ssh-brute-force.js';
+import { AiProviderError } from '../ai/errors.js';
+import { CreateRunSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, RunSchema } from './simulation-schemas.js';
+
+const loopback = (ip: string): boolean => ip === '::1' || ip.startsWith('127.') && isIP(ip) === 4 || ip.startsWith('::ffff:127.');
+
+export interface SimulationRouteOptions {
+  service: SimulationService;
+  accessToken?: string;
+  allowedOrigin?: string;
+  models: () => readonly { providerId: string; modelId: string | null; configured: boolean }[];
+}
+
+export async function simulationRoutes(app: FastifyInstance, options: SimulationRouteOptions): Promise<void> {
+  const streams = new EventStream();
+  const repo = options.service.repository;
+  const guard = (request: FastifyRequest): void => {
+    if (!options.accessToken && !loopback(request.ip)) throw new ApplicationError('LOCAL_ACCESS_REQUIRED', 403);
+    if (options.accessToken) {
+      const header = request.headers.authorization ?? '';
+      const expected = `Bearer ${options.accessToken}`;
+      if (Buffer.byteLength(header) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(header), Buffer.from(expected))) {
+        throw new ApplicationError('ACCESS_DENIED', 401);
+      }
+    }
+    const host = request.headers.host ?? '';
+    let hostName: string;
+    try {
+      const parsed = new URL(`http://${host}`);
+      if (parsed.username || parsed.password || parsed.host.toLowerCase() !== host.toLowerCase()) throw new Error();
+      hostName = parsed.hostname;
+    } catch { throw new ApplicationError('INVALID_HOST', 403); }
+    if (!options.accessToken && !['localhost', '127.0.0.1', '[::1]'].includes(hostName)) {
+      throw new ApplicationError('INVALID_HOST', 403);
+    }
+    const origin = request.headers.origin;
+    if (origin !== undefined && origin !== (options.allowedOrigin ?? `http://${host}`)) {
+      throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
+    }
+    if (request.headers['sec-fetch-site'] === 'cross-site') throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
+  };
+  const authorizeRun = async (request: FastifyRequest<{ Params: { id: string } }>): Promise<void> => {
+    const token = request.headers['x-run-token'];
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new ApplicationError('RUN_ACCESS_DENIED', 401);
+    await repo.authorize(request.params.id, token);
+  };
+  app.addHook('onRequest', async (request) => guard(request));
+  app.addHook('onSend', async (_request, reply) => { reply.header('Cache-Control', 'no-store'); });
+  app.addHook('preClose', async () => { streams.close(); });
+  app.setErrorHandler((error, _request, reply) => {
+    const httpError = error as FastifyError;
+    let status = 500;
+    let code = 'INTERNAL_SERVER_ERROR';
+    if (error instanceof ApplicationError) { status = error.statusCode; code = error.code; }
+    else if (error instanceof AiProviderError) { status = 503; code = error.code; }
+    else if (httpError.validation) { status = 400; code = 'INVALID_REQUEST'; }
+    else if (httpError.statusCode === 413) { status = 413; code = 'PAYLOAD_TOO_LARGE'; }
+    else if (httpError.statusCode === 400) { status = 400; code = 'INVALID_REQUEST'; }
+    void reply.code(status).send({ error: { code, message: code } });
+  });
+
+  app.get('/api/v1/scenarios', {
+    schema: { querystring: EmptyQuery, response: { 200: Type.Object({ scenarios: Type.Array(Type.Object({ id: Type.String(), version: Type.String(), title: Type.String(), initialVariants: Type.Array(Type.String()) })) }), ...ErrorResponses } },
+  }, async () => ({ scenarios: [{ id: sshBruteForceScenario.id, version: '1.0.0', title: sshBruteForceScenario.title,
+    initialVariants: ['externalSource', 'protectedInternalSource'] }] }));
+
+  app.get('/api/v1/models', {
+    schema: { querystring: EmptyQuery, response: { 200: Type.Object({ models: Type.Array(Type.Object({ providerId: Type.String(), modelId: Type.Union([Type.String(), Type.Null()]), configured: Type.Boolean() })) }), ...ErrorResponses } },
+  }, async () => ({ models: options.models() }));
+
+  app.post<{ Body: { scenarioId: string; initialVariant: 'externalSource' | 'protectedInternalSource' } }>('/api/v1/runs', {
+    bodyLimit: 4096, schema: { body: CreateRunSchema, querystring: EmptyQuery,
+      response: { 202: Type.Object({ run: RunSchema, accessToken: Type.String() }), ...ErrorResponses } },
+  }, async (request, reply) => {
+    const result = await options.service.create(request.body.scenarioId, request.body.initialVariant);
+    return reply.code(202).send(result);
+  });
+
+  app.get<{ Params: { id: string } }>('/api/v1/runs/:id', {
+    schema: { params: IdParams, querystring: EmptyQuery, response: { 200: RunSchema, ...ErrorResponses } },
+    preHandler: authorizeRun,
+  }, async (request) => repo.read(request.params.id));
+
+  for (const action of ['pause', 'resume', 'cancel'] as const) {
+    app.post<{ Params: { id: string } }>(`/api/v1/runs/:id/${action}`, {
+      bodyLimit: 128,
+      schema: { params: IdParams, querystring: EmptyQuery, body: Type.Optional(EmptyQuery), response: { 200: RunSchema, ...ErrorResponses } },
+      preValidation: async (request) => { if (request.body === undefined) request.body = {}; },
+      preHandler: authorizeRun,
+    }, async (request) => options.service.control(request.params.id, action));
+  }
+
+  app.get<{ Params: { id: string } }>('/api/v1/runs/:id/result', {
+    schema: { params: IdParams, querystring: EmptyQuery, response: { 200: Type.Object({ evaluation: EvaluationSchema, ruleAdherence: Type.Union([Type.Number(), Type.Null()]) }), ...ErrorResponses } },
+    preHandler: authorizeRun,
+  }, async (request) => {
+    const run = await repo.read(request.params.id);
+    if (!run.evaluation) throw new ApplicationError('RESULT_NOT_READY', 409);
+    const count = run.evaluation.totalDecisions;
+    return { evaluation: run.evaluation, ruleAdherence: count === 0 ? null : run.evaluation.approvedDecisions * 100 / count };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { after?: number } }>('/api/v1/runs/:id/events', {
+    schema: { params: IdParams, querystring: Type.Object({ after: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })) }, { additionalProperties: false }), response: { 200: Type.String({ description: 'SSE frames containing committed AuditEventSchema records.' }), ...ErrorResponses } },
+    preHandler: authorizeRun,
+  }, async (request, reply) => {
+    let after = request.query.after ?? 0;
+    const last = request.headers['last-event-id'];
+    if (last !== undefined) {
+      if (typeof last !== 'string' || last.split(':').length !== 2 ||
+          !last.startsWith(`${request.params.id}:`) || !/^\d{1,7}$/.test(last.split(':')[1] ?? '')) {
+        throw new ApplicationError('INVALID_EVENT_CURSOR', 400);
+      }
+      after = Number(last.split(':')[1]);
+    }
+    const run = await repo.read(request.params.id);
+    if (after > run.eventSequence) throw new ApplicationError('INVALID_EVENT_CURSOR', 400);
+    streams.reserve(reply.raw, run.id);
+    reply.hijack();
+    reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
+    reply.raw.flushHeaders();
+    await streams.stream(repo, run.id, after, reply.raw);
+  });
+}

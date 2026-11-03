@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { immutableDataSnapshot } from '../immutable.js';
 import {
-  advanceNarrative,
   initializeScenario,
 } from '../narrative/engine.js';
 import {
@@ -18,10 +17,9 @@ import type {
   TransitionRecord,
   WorldState,
 } from '../narrative/types.js';
-import { evaluateDecision } from '../referee/evaluator.js';
+import { RefereeValidationError } from '../referee/errors.js';
 import {
   DEFAULT_REFEREE_POLICY_SET,
-  validateProposedDecision,
   validateRefereePolicySet,
 } from '../referee/index.js';
 import type { ProposedDecision, RefereePolicySet, RefereeResult } from '../referee/types.js';
@@ -29,11 +27,11 @@ import { requestDecision } from './decision-provider.js';
 import {
   SimulationConfigurationError,
   SimulationProviderError,
-  SimulationRefereeError,
   SimulationNarrativeError,
   toSimulationErrorInfo,
 } from './errors.js';
 import { buildSimulationEvaluation } from './evaluation.js';
+import { evaluateSimulationStep } from './step.js';
 import {
   assertLifecycleTransition,
   isTerminalStatus,
@@ -396,9 +394,10 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           return this.toSnapshot(runtime);
         }
 
-        let decision: ProposedDecision;
+        let step: ReturnType<typeof evaluateSimulationStep>;
         try {
-          decision = validateProposedDecision(rawDecision);
+          step = evaluateSimulationStep(rawDecision, runtime.narrative, runtime.scenario,
+            runtime.policySet, sequence, this.nowIso());
         } catch (error) {
           if (!this.isActive(runtime, generation, controller)) {
             return this.toSnapshot(runtime);
@@ -408,39 +407,9 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
             runtime,
             'FAILED',
             'INCONCLUSIVE',
-            'INVALID_DECISION',
-            `Decision provider returned an invalid decision at sequence ${sequence}.`,
-            Object.freeze({ ...info, code: 'INVALID_DECISION' }),
-          );
-          break;
-        }
-
-        let refereeResult: RefereeResult;
-        try {
-          refereeResult = evaluateDecision(
-            decision,
-            runtime.narrative,
-            runtime.scenario,
-            { policySet: runtime.policySet },
-          );
-        } catch (error) {
-          if (!this.isActive(runtime, generation, controller)) {
-            return this.toSnapshot(runtime);
-          }
-          this.finishRun(
-            runtime,
-            'FAILED',
-            'INCONCLUSIVE',
-            'REFEREE_ERROR',
-            `Referee evaluation failed at decision ${sequence}.`,
-            toSimulationErrorInfo(
-              new SimulationRefereeError(
-                'REFEREE_ERROR',
-                error instanceof Error ? error.message : String(error),
-              ),
-              'referee',
-              sequence,
-            ),
+            error instanceof RefereeValidationError ? 'INVALID_DECISION' : 'REFEREE_ERROR',
+            `Decision evaluation failed at sequence ${sequence}.`,
+            Object.freeze({ ...info, code: error instanceof RefereeValidationError ? 'INVALID_DECISION' : 'REFEREE_ERROR' }),
           );
           break;
         }
@@ -448,15 +417,9 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
         if (!this.isActive(runtime, generation, controller)) {
           return this.toSnapshot(runtime);
         }
-
+        const { decision, referee: refereeResult } = step.record;
+        this.appendRecord(runtime, sequence, decision, refereeResult, step.record.transition);
         if (!refereeResult.approved) {
-          this.appendRecord(
-            runtime,
-            sequence,
-            decision,
-            refereeResult,
-            null,
-          );
           this.finishRun(
             runtime,
             'COMPLETED',
@@ -468,48 +431,19 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           break;
         }
 
-        let appliedTransition: TransitionRecord;
-        let nextState: NarrativeState;
-        try {
-          const applied = advanceNarrative(
-            runtime.narrative,
-            runtime.scenario,
-            { storyletId: decision.storyletId, outcomeId: decision.outcomeId },
-          );
-          if (applied.status !== 'advanced') {
-            throw new SimulationNarrativeError(
-              'NARRATIVE_NOT_ADVANCED',
-              `Approved decision could not advance the narrative: ${applied.status}`,
-            );
-          }
-          appliedTransition = applied.record;
-          nextState = applied.state;
-        } catch (error) {
-          this.appendRecord(
-            runtime,
-            sequence,
-            decision,
-            refereeResult,
-            null,
-          );
+        if (step.error) {
           this.finishRun(
             runtime,
             'FAILED',
             'INCONCLUSIVE',
             'NARRATIVE_ERROR',
             `Narrative transition failed at decision ${sequence}.`,
-            toSimulationErrorInfo(error, 'narrative', sequence),
+            step.error,
           );
           break;
         }
 
-        this.appendRecord(
-          runtime,
-          sequence,
-          decision,
-          refereeResult,
-          appliedTransition,
-        );
+        const nextState = step.state;
         runtime.narrative = nextState;
         runtime.updatedAt = this.nowIso();
 

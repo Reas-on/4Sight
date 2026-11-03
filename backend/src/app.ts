@@ -1,10 +1,13 @@
-import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyError, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { loadEnv, type Env } from './config/env.js';
 import { databasePlugin } from './plugins/database.js';
 import { healthRoutes } from './routes/health.js';
+import { simulationPlugin } from './plugins/simulation.js';
+import type { ProviderFactory } from './application/simulation/simulation-service.js';
 
 export interface BuildAppOptions {
   env?: Env;
+  simulationProviderFactory?: ProviderFactory;
 }
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -14,8 +17,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     logger: {
       level: env.LOG_LEVEL,
       base: { service: '4sight-backend', environment: env.NODE_ENV },
+      serializers: { req: (request: FastifyRequest) => ({
+        method: request.method, url: request.url.split('?')[0] ?? '/', remoteAddress: request.ip,
+      }) },
       redact: {
-        paths: ['req.headers.authorization', 'req.headers.cookie', '*.apiKey', '*.GEMINI_API_KEY', 'prompt', 'additionalContext'],
+        paths: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-run-token"]', '*.apiKey', '*.GEMINI_API_KEY', 'prompt', 'additionalContext'],
         censor: '[REDACTED]',
       },
     },
@@ -27,10 +33,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       },
     },
     trustProxy: false,
+    forceCloseConnections: true,
   });
 
   app.register(databasePlugin, { env });
   app.register(healthRoutes);
+  if (env.SIMULATION_ENABLED) {
+    app.register(simulationPlugin, { env,
+      ...(options.simulationProviderFactory ? { providerFactory: options.simulationProviderFactory } : {}) });
+  }
 
   app.setNotFoundHandler((request, reply) => {
     void reply.code(404).send({

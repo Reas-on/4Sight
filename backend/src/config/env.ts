@@ -26,6 +26,10 @@ const EnvSchema = Type.Object({
   DB_POOL_MAX: Type.Integer({ minimum: 1, maximum: 100 }),
   DB_CONNECTION_TIMEOUT_MS: Type.Integer({ minimum: 100, maximum: 60_000 }),
   DB_IDLE_TIMEOUT_MS: Type.Integer({ minimum: 1_000, maximum: 600_000 }),
+  SIMULATION_ENABLED: Type.Optional(Type.Boolean()),
+  SIMULATION_MODE: Type.Optional(Type.Union([Type.Literal('ai'), Type.Literal('fixture')])),
+  SIMULATION_ACCESS_TOKEN: Type.Optional(Type.String({ minLength: 32, maxLength: 200, pattern: '^[A-Za-z0-9._~-]+$' })),
+  SIMULATION_ALLOWED_ORIGIN: Type.Optional(Type.String({ pattern: '^https?://[^/]+$' })),
 });
 
 export type Env = Static<typeof EnvSchema>;
@@ -59,6 +63,11 @@ export function loadEnv(): Env {
     DB_POOL_MAX: Number(process.env.DB_POOL_MAX ?? 10),
     DB_CONNECTION_TIMEOUT_MS: Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 5000),
     DB_IDLE_TIMEOUT_MS: Number(process.env.DB_IDLE_TIMEOUT_MS ?? 30000),
+    SIMULATION_ENABLED: process.env.SIMULATION_ENABLED === undefined ? true
+      : process.env.SIMULATION_ENABLED === 'true' ? true : process.env.SIMULATION_ENABLED === 'false' ? false : process.env.SIMULATION_ENABLED,
+    SIMULATION_MODE: process.env.SIMULATION_MODE ?? 'ai',
+    ...(process.env.SIMULATION_ACCESS_TOKEN ? { SIMULATION_ACCESS_TOKEN: process.env.SIMULATION_ACCESS_TOKEN } : {}),
+    ...(process.env.SIMULATION_ALLOWED_ORIGIN ? { SIMULATION_ALLOWED_ORIGIN: process.env.SIMULATION_ALLOWED_ORIGIN } : {}),
   };
 
   if (!Value.Check(EnvSchema, raw)) {

@@ -8,6 +8,13 @@
       "when": 1793680272805,
       "tag": "0000_magical_stark_industries",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793708854684,
+      "tag": "0001_curved_fallen_one",
+      "breakpoints": true
     }
   ]
 }

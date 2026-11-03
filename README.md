@@ -297,4 +297,91 @@ During this implementation's explicit smoke invocation, the result was **`BLOCKE
 
 ### Current scope
 
-Phases 0–2 and the Phase 3 adapter/validation/retry pipeline are implemented. Live inference acceptance is blocked as documented above. Simulation REST/SSE endpoints, run persistence, SOAR execution, and frontend integration remain deferred.
+Phases 0–3 are implemented, with live inference acceptance blocked as documented above. Phase 4 persistence/transport is described below. SOAR execution and frontend integration remain deferred.
+
+## Durable runs, REST and SSE (Phase 4)
+
+The production API uses PostgreSQL as the authority for simulation state. `application/simulation/` coordinates execution and recovery; `infrastructure/persistence/` implements the application repository interface with Drizzle transactions; `infrastructure/streaming/` replays the audit log. Routes contain transport/access concerns. Narrative and Referee modules have no PostgreSQL/Fastify dependencies, and AI adapters never write database rows.
+
+### Persistence and consistency
+
+Migration `0001_curved_fallen_one.sql` adds five tables while preserving `app_metadata` and the named PostgreSQL volume:
+
+| Table | Authoritative content |
+| --- | --- |
+| `simulation_runs` | UUID, hashed run capability, scenario/version, provider/model, lifecycle, state pointer, revision, audit sequence, non-secret scenario configuration, timestamps and structured failure |
+| `simulation_snapshots` | Validated complete narrative snapshots, unique `(run_id, state_version)`; includes world and narrative bookkeeping needed to resume safely |
+| `simulation_decisions` | Unique `(run_id, step_sequence)` record joining proposal, complete Referee evidence/policy version, and optional transition |
+| `simulation_events` | UUID event identity plus unique ordered `(run_id, sequence)` and typed event payload |
+| `simulation_evaluations` | One final evaluation per run, with actual decision counts and policy violations |
+
+JSON records reuse the Phase 2 contracts instead of duplicating each verdict/evaluation property in separate columns. Run lifecycle/version columns support concurrency checks and snapshot lookup. Only successful transitions create a new snapshot/version. Rejection and infrastructure failure preserve the last committed state.
+
+Each decision commit locks the run row, checks `RUNNING`, expected revision and expected state version, evaluates the existing shared domain step, and writes decision evidence, snapshot, events, state pointer and any final evaluation in **one transaction**. Failure rolls all of these back. Revisions also change on pause/resume/cancel, fencing a stale response even when the narrative version is unchanged. Duplicate requests and terminal mutations return conflicts. Existing in-memory orchestration uses the same extracted step function for domain tests; it is not an API state store.
+
+Free-form AI reasoning is not persisted. Source/incident parameter values are retained only as SHA-256 fingerprints, not raw text; backend-generated run/step decision IDs replace model IDs. Referee verdict/evidence and allowed effects remain intact. Configuration snapshots contain the built-in executable scenario, variant and provider/model—not credentials, headers, prompts or environment dumps. Audit behavior is append-only through the application, with no delete/update event operation. This is **not cryptographic tamper evidence**; database administrators retain database privileges.
+
+### Start and access configuration
+
+Native local development:
+
+```sh
+docker compose up -d db
+cd backend
+npm run db:migrate
+# Explicit fixture demo; AI is the default and never silently falls back.
+SIMULATION_ENABLED=true SIMULATION_MODE=fixture npm run dev
+```
+
+`SIMULATION_ENABLED` defaults to true in native environment loading. Set false for the original health-only service. `SIMULATION_MODE=ai` uses the Phase 3 registry and trusted environment model selection; unconfigured providers return `503 PROVIDER_NOT_CONFIGURED`. Fixture mode is an explicit simulated demo. `/api/v1/models` reports configured metadata without probing/downloads or secrets.
+
+Host bindings stay loopback by default. A non-loopback `HOST` **requires** `SIMULATION_ACCESS_TOKEN` (32–200 URL-safe characters) before simulation startup is allowed. When configured, every simulation endpoint requires `Authorization: Bearer <token>`, including local requests. Compose retains its local published ports and defaults simulation operations off unless `SIMULATION_ENABLED=true`; enabling them with its internal `HOST=0.0.0.0` requires that token. AI environment variables are passed only to the backend service. Do not expose Ollama publicly.
+
+Without a protective token, simulation routes accept only loopback connections and loopback Host names. All modes reject mismatched browser origins and cross-site fetches; there is no wildcard CORS or origin reflection. `SIMULATION_ALLOWED_ORIGIN` can specify one exact trusted origin; default is the same HTTP origin. Each created run also returns a random `accessToken` exactly once, stored only as a hash; every run-scoped request requires `X-Run-Token`. Tokens belong in headers, never URLs. Responses use `no-store`; request logs redact authorization and run-token headers.
+
+This is a local/single-tenant capability boundary, **not user authentication or production multi-user ownership**. Possession of the run token grants access. Future identity/ownership enforcement belongs at the route authorization hook. For non-local deployment use private networking and TLS/access enforcement; a shared bearer token alone is not enterprise IAM.
+
+### Versioned endpoint contracts
+
+All JSON endpoints use TypeBox/Ajv request and response schemas. Creation bodies are limited to 4 KiB, lifecycle bodies to 128 bytes; extra properties, malformed JSON, invalid UUIDs and cursor mismatches are rejected. There are no endpoint/model overrides, raw imported scenarios, command fields, or Additional Context fields in the Phase 4 request contract.
+
+| Method/path | Request/result |
+| --- | --- |
+| `GET /api/v1/scenarios` | Executable built-in IDs, version, title and initial variants |
+| `GET /api/v1/models` | Selected configured provider/model metadata |
+| `POST /api/v1/runs` | `{ "scenarioId":"ssh-brute-force", "initialVariant":"externalSource" }` or `protectedInternalSource`; `202 { run, accessToken }` |
+| `GET /api/v1/runs/:id` | Persisted run, latest narrative snapshot, ordered decision evidence, optional final evaluation |
+| `POST /api/v1/runs/:id/pause` | Empty body or `{}`; pause at committed boundary and discard pending inference |
+| `POST /api/v1/runs/:id/resume` | Resume from persisted state; provider/model must still match original provenance |
+| `POST /api/v1/runs/:id/cancel` | Commit cancellation/evaluation, abort pending inference and reject stale results |
+| `GET /api/v1/runs/:id/events` | SSE; optional `after=<sequence>` or `Last-Event-ID: <run UUID>:<sequence>` |
+| `GET /api/v1/runs/:id/result` | `{ evaluation, ruleAdherence }`; `409 RESULT_NOT_READY` until final |
+
+Errors have `{ "error": { "code": "…", "message": "…" } }` without stacks or raw provider errors. Statuses include `400` validation, `401/403` access, `404` unknown/inaccessible run, `409` lifecycle/stale revision/not-ready, `413` payload limit, `429` bounded capacity, `503` executor/provider configuration, and generic `500` internal failure. No retry endpoint exists; create a new run with a new UUID/token.
+
+`ruleAdherence` is derived from the existing Referee counts (`approved / evaluated × 100`), not a new model-quality score. It is `null` for zero evaluated decisions. Execution completion, provider success, policy verdict and final `PASS/FAIL/INCONCLUSIVE` remain distinct. No hallucination metric is fabricated.
+
+### Ordered SSE and recovery
+
+SSE polls committed PostgreSQL audit events in sequence-limited batches of 50; there is no process-only publication buffer. Frames carry `event: <event_type>`, stable cursor `id: <run UUID>:<sequence>`, and a JSON `AuditEventSchema` record (including its event UUID). Event types are `run.created`, `run.start/pause/resume`, `decision.evaluated`, `transition.committed`, and `run.finished`. Reconnect resumes after the cursor; clients should deduplicate by run/sequence or event UUID. Reconnecting never executes a run.
+
+Only committed rows can be read: **database commit precedes SSE visibility**. Streams close after the final persisted event; active streams emit heartbeat comments every 10 seconds. Client disconnects do not stop execution. Limits are 16 streams total/4 per run, 16 active execution workers, and bounded queued database/control operations. Slow consumers are disconnected when write backpressure appears, then can replay from PostgreSQL; no unbounded queue is accumulated.
+
+This MVP enforces **one active simulation executor per database** using a PostgreSQL session advisory lock. All repository transactions use that same dedicated, serialized session, so losing the lock connection fences further writes and aborts workers. A second live executor fails startup rather than recovering another process's active runs. Row locks, revisions and unique constraints additionally protect transitions.
+
+After acquiring exclusive ownership at startup, recovery marks leftover `RUNNING` rows `FAILED / INCONCLUSIVE` with `PROCESS_INTERRUPTED`, appends a final event, and preserves the last snapshot and evidence. `PAUSED`, `CREATED` and terminal rows are preserved; no crash-resume of AI inference occurs. Graceful shutdown aborts workers, ends SSE streams, records interrupted executions and releases the executor session before pool shutdown. Prior run capabilities still work after a restart. If the database is unavailable during shutdown, the next successful startup performs recovery.
+
+### Verification
+
+After migrations, from `backend/`:
+
+```sh
+npm run typecheck
+npm run build
+npm run test:phase4
+npm test -- src/domain/simulation/tests/orchestrator.test.ts src/domain/narrative/tests/engine.test.ts src/ai/tests src/domain/referee/tests/evaluator.test.ts src/routes/health.test.ts
+```
+
+`test:phase4` explicitly opts into local PostgreSQL tests and runs files sequentially because executor ownership is exclusive. It uses the existing configured database without resetting volumes or deleting audit history; fixture test runs remain inspectable. It temporarily adds/removes a test-only constraint to prove transaction rollback, so run it on a development/test database. The tests include a real HTTP/SSE smoke/reconnect flow and an abruptly exited child executor followed by startup recovery. AI transport is mocked; no paid inference is invoked.
+
+Verified behavior includes creation, atomic state/evidence/audit writes, injected rollback, duplicate fencing, durable PASS/FAIL, zero-decision INCONCLUSIVE/null adherence, ordered replay, access/payload rejection, SSE capacity/disconnect handling, lifecycle concurrency, late cancellation, AI output/timeout propagation, run isolation and restart recovery. Live AI inference remains **BLOCKED** as documented for Phase 3. Frontend integration belongs to Phase 5 and is not implemented here.

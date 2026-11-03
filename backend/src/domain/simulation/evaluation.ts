@@ -1,12 +1,25 @@
-import type { RunRuntime } from './run-store.js';
+import type { NarrativeState } from '../narrative/types.js';
+import type { RefereePolicySet } from '../referee/types.js';
+import type { DecisionProvider, SimulationRecord, SimulationStatus } from './types.js';
 import type {
   PolicyViolation,
   SimulationEvaluation,
   SimulationEvaluationOutcome,
 } from './types.js';
 
+export interface EvaluationContext {
+  readonly runId: string;
+  readonly scenario: { readonly id: string };
+  readonly provider: Pick<DecisionProvider, 'provenance'>;
+  readonly status: SimulationStatus;
+  readonly records: readonly SimulationRecord[];
+  readonly narrative: NarrativeState;
+  readonly startedAt: string | null;
+  readonly policySet: Pick<RefereePolicySet, 'id' | 'version'>;
+}
+
 export function buildSimulationEvaluation(
-  runtime: RunRuntime,
+  runtime: EvaluationContext,
   outcome: SimulationEvaluationOutcome,
   reasonCode: string,
   summary: string,
