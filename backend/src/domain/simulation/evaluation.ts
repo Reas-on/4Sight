@@ -39,6 +39,7 @@ export function buildSimulationEvaluation(
   return Object.freeze({
     runId: runtime.runId,
     scenarioId: runtime.scenario.id,
+    providerProvenance: runtime.provider.provenance ?? null,
     status: runtime.status,
     outcome,
     reasonCode,

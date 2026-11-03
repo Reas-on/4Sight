@@ -156,7 +156,7 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
     const maxDecisions = Math.min(configuredMaxDecisions, scenario.maxTransitions);
 
     const decisionTimeoutMs =
-      config.decisionTimeoutMs ?? this.defaultDecisionTimeoutMs;
+      config.decisionTimeoutMs ?? config.provider.decisionTimeoutMs ?? this.defaultDecisionTimeoutMs;
     assertPositiveInteger(decisionTimeoutMs, 'decisionTimeoutMs');
 
     const runId = config.runId ?? this.runIdFactory();
@@ -176,7 +176,12 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
       runId,
       scenario,
       initialState,
-      provider: config.provider,
+      provider: Object.freeze({
+        id: config.provider.id,
+        decide: config.provider.decide.bind(config.provider),
+        ...(config.provider.provenance === undefined
+          ? {} : { provenance: immutableDataSnapshot(config.provider.provenance) }),
+      }),
       policySet,
       maxDecisions,
       decisionTimeoutMs,
@@ -355,7 +360,7 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           state: runtime.narrative,
           selectedStorylet: resolution.storylet,
           eligibleStorylets,
-          eligibleStoryletIds: resolution.eligibleStoryletIds,
+          eligibleStoryletIds: Object.freeze([...resolution.eligibleStoryletIds]),
           records: Object.freeze([...runtime.records]),
           signal: controller.signal,
         });
@@ -373,7 +378,7 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           }
 
           const info = toSimulationErrorInfo(error, 'provider', sequence);
-          const timeout = info.code === 'DECISION_TIMEOUT';
+          const timeout = info.code === 'DECISION_TIMEOUT' || info.code === 'PROVIDER_TIMEOUT';
           this.finishRun(
             runtime,
             'FAILED',
@@ -607,6 +612,7 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
       runId: runtime.runId,
       scenarioId: runtime.scenario.id,
       providerId: runtime.provider.id,
+      providerProvenance: runtime.provider.provenance ?? null,
       status: runtime.status,
       createdAt: runtime.createdAt,
       updatedAt: runtime.updatedAt,

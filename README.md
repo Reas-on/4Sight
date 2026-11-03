@@ -34,7 +34,7 @@ Browser acceptance tests: install a Playwright browser with `npx playwright inst
 
 The current demo has no failure/interception outcomes. `NODE_FAILED` and `NODE_INTERCEPTED` have distinct caution cues in the engine, but are not emitted by this successful illustrative sequence. Completion tones mean local demonstration progression, never security validation.
 
-**All frontend execution states are simulated.** The frontend has no LLM, backend policy evaluation, or SOAR integration and is not connected to the backend yet. The Phase 2 backend evaluates deterministic scenario fixtures separately. See `SPEC.md` for the provisional frontend contract and data boundaries. The original repository and reference screenshots were not available.
+**All frontend execution states are simulated.** The frontend has no LLM, backend policy evaluation, or SOAR integration and is not connected to the backend yet. The backend separately supports deterministic fixtures and Phase 3 AI-proposed decisions evaluated by the Referee. See `SPEC.md` for the provisional frontend contract and data boundaries. The original repository and reference screenshots were not available.
 
 ## Repository layout
 
@@ -216,6 +216,85 @@ A referee rejection ends the run because this fixture has no rejection-recovery 
 
 Run `npm run typecheck`, `npm run build`, and `npm test` in `backend/` to verify the modules. Tests cover both successful paths, protected-source rejection, malformed/failing/timed-out providers, dead ends, transition rollback, decision limits, lifecycle controls, stale responses, concurrent run isolation, immutable boundaries, and deterministic replay.
 
+## AI provider integration (Phase 3)
+
+Historical milestone reference: **2026-09-24T12:00:00+07:00** (user-specified planning metadata, not the implementation, commit, or push date).
+
+`backend/src/ai/` provides Gemini through Google's official `@google/genai` SDK and Ollama through `POST /api/chat`. Both implement the existing `DecisionProvider.decide(context)` contract. The registry selects one explicit provider for a run, with no fallback or model discovery. Phase 2 scripted providers remain available for deterministic tests.
+
+### Configuration and usage
+
+Copy the AI placeholders from `.env.example` into your untracked `.env`, or supply them through the backend process environment. `loadAiConfig()` uses the existing dotenv search/precedence without requiring a database connection. Only the selected provider needs credentials/model configuration.
+
+| Variable | Meaning |
+| --- | --- |
+| `AI_PROVIDER` | Explicitly `gemini` or `ollama`; blank/unset means unconfigured |
+| `GEMINI_API_KEY` | Server-side Gemini Developer API key |
+| `GEMINI_MODEL` | Explicit supported model ID; no assumed model default |
+| `OLLAMA_BASE_URL` | Trusted backend-configured HTTP(S) origin; default `http://127.0.0.1:11434` |
+| `OLLAMA_MODEL` | Explicit locally installed model name; no automatic pull/download |
+| `AI_REQUEST_TIMEOUT_MS` | Per-attempt deadline, default `30000`, range `10`–`120000` |
+| `AI_MAX_RETRIES` | Additional attempts, default `2`, range `0`–`3` |
+
+Example from a backend TypeScript module (adjust relative imports to its location):
+
+```ts
+import { loadAiConfig } from './src/config/env.js';
+import { createConfiguredProvider } from './src/ai/index.js';
+import { InMemorySimulationOrchestrator } from './src/domain/simulation/index.js';
+import { sshBruteForceScenario, sshBruteForceInitialStates } from './src/domain/narrative/index.js';
+
+const provider = createConfiguredProvider(loadAiConfig(), {
+  additionalContext: 'Optional untrusted scenario notes.',
+});
+const engine = new InMemorySimulationOrchestrator();
+const run = engine.createRun({
+  scenario: sshBruteForceScenario,
+  initialState: sshBruteForceInitialStates.externalSource,
+  provider,
+});
+const result = await engine.startRun(run.runId);
+```
+
+Provider objects and run-level provider/model provenance are frozen. The orchestrator captures the selected provider method/identity when creating the run. Its timeout defaults to the provider's bounded inference budget, avoiding the Phase 2 fixture default of one second; an explicit per-run timeout may shorten it. Provider/model provenance is retained even when inference fails before producing a record.
+
+Ollama must already be running with the configured model installed. Keep it loopback-bound; this project does not start or expose an Ollama service. Inside a container, loopback refers to that container: supply a trusted private backend origin if needed. No provider variables are exposed through Vite, and no inference route is added to the existing Compose API service.
+
+### Structured output and trust boundary
+
+The model supplies only `actionType`, required `parameters` (possibly `{}`), `storyletId`, `outcomeId`, and optional `reasoning`. The normalizer supplies backend-generated decision IDs and the selected provider ID, then invokes the existing Phase 2 validator. Missing required model fields, unknown/extra fields (including verdicts, effects, scores, state versions, and audit events), non-JSON/markdown, truncated responses, and tool-call responses are rejected. There is no output repair, coercion, or invented decision content.
+
+The prompt contains separate system instructions and a bounded JSON data message: backend state/opportunity IDs are distinguished from untrusted scenario descriptions and Additional Context. It excludes state effects, previous raw responses, credentials, and backend environment dumps. Known configured Gemini keys and common credential patterns are redacted from scenario text before transmission. Arbitrary text cannot be comprehensively classified as secret; only submit scenario data intended for the selected provider. Full prompts/responses and raw upstream errors are never logged by the adapters. Normalized errors contain fixed messages; the API logger also redacts common credential/prompt fields.
+
+Gemini's service origin is fixed; Ollama's origin comes only from trusted backend configuration. Endpoint URLs with credentials, query strings, fragments, or non-root paths are rejected. Redirects are disabled. Scenario text and model output cannot choose the URL or model. No tools, shell commands, firewall actions, host actions, or SOAR calls are executed.
+
+Structured JSON is still just a proposal: the unchanged Referee policies remain authoritative. A schema-valid protected-source block is recorded as a rejection with evidence; no rejected effects are committed. Invalid output is recorded as a provider error with an `INCONCLUSIVE` evaluation and no invented approved-decision record.
+
+### Resource limits, retry, and cancellation
+
+- Prompt data: at most 32 KiB UTF-8; complete transport response: at most 64 KiB before JSON parsing; decision text: at most 16 KiB; generated output: at most 2,048 tokens.
+- Both providers request schema-constrained, non-streaming JSON. A reduced Gemini-supported JSON Schema is derived from the runtime decision schema; the full TypeBox constraints are still enforced locally.
+- Only unavailability, timeout, and rate limiting are retried. Backoff is exponential (`250ms`, `500ms`, `1000ms` for up to three retries), honoring larger retry hints when the total budget permits. The total budget is `(retries + 1) × request timeout + retries × 2000ms`. An excessive retry hint ends the request rather than sleeping beyond the budget. Auth errors, missing models, invalid output, oversize responses, and configuration/request errors are not retried.
+- Gemini SDK retries and automatic continuation are disabled so one pipeline attempt cannot multiply into hidden calls. Retrying inference is safe only in the sense that this pipeline executes no actions; timed-out remote generations may still consume provider resources or incur charges.
+- Abort signals interrupt active work and retry sleeps. Timeout/cancel races are bounded even if a transport ignores the signal. The existing orchestrator generation checks prevent stale responses after pause, resume, or cancellation from committing state.
+
+Errors are typed: `PROVIDER_NOT_CONFIGURED`, `PROVIDER_UNAVAILABLE`, `PROVIDER_TIMEOUT`, `PROVIDER_RATE_LIMITED`, `PROVIDER_AUTH_ERROR`, `MODEL_NOT_FOUND`, `INVALID_AI_OUTPUT`, `PROVIDER_CANCELLED`, and `PROVIDER_RESPONSE_TOO_LARGE`. Additional configuration/request/context errors distinguish unsupported requests and oversized input. Execution status, provider errors, Referee verdicts, and overall evaluation remain separate; no new scoring or hallucination metrics are produced.
+
+### Verification and one-call live smoke check
+
+From `backend/`:
+
+```sh
+npm run typecheck
+npm run build
+npm test -- src/ai/tests src/domain/simulation/tests/orchestrator.test.ts src/domain/referee/tests/evaluator.test.ts src/routes/health.test.ts
+npm run ai:smoke -- --live
+```
+
+The test suite injects mocked HTTP transport, including the official SDK's fetch hook; it makes no inference calls. The explicitly invoked smoke script makes **at most one inference request**, with retries disabled, using the selected configured provider. It validates the result, runs the Referee, prints only safe provenance/status evidence, and commits no effects. `PASS` means an actual inference returned schema-valid output; the Referee verdict is reported separately. Exit code `2` indicates a blocked prerequisite, `1` indicates a failed check, and `0` indicates successful inference/validation.
+
+During this implementation's explicit smoke invocation, the result was **`BLOCKED: PROVIDER_NOT_CONFIGURED`**: no selected provider, Gemini credential/model, or Ollama model was configured in the process/local environment. No live inference request was sent. Real-provider acceptance remains pending configuration and a successful invocation of the command above.
+
 ### Current scope
 
-Phase 0 infrastructure, the Phase 1 Narrative Engine, and the Phase 2 in-memory orchestrator, referee, and evaluation are implemented. Simulation REST/SSE endpoints, run persistence, live AI inference, SOAR execution, and frontend integration are planned for later phases.
+Phases 0–2 and the Phase 3 adapter/validation/retry pipeline are implemented. Live inference acceptance is blocked as documented above. Simulation REST/SSE endpoints, run persistence, SOAR execution, and frontend integration remain deferred.

@@ -14,6 +14,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     logger: {
       level: env.LOG_LEVEL,
       base: { service: '4sight-backend', environment: env.NODE_ENV },
+      redact: {
+        paths: ['req.headers.authorization', 'req.headers.cookie', '*.apiKey', '*.GEMINI_API_KEY', 'prompt', 'additionalContext'],
+        censor: '[REDACTED]',
+      },
     },
     ajv: {
       customOptions: {

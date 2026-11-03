@@ -12,10 +12,12 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "ai:smoke": "tsx src/ai/smoke.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.32.0",
     "@sinclair/typebox": "^0.34.52",
     "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",

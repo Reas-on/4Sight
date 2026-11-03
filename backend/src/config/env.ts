@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
+import { parseAiConfig } from '../ai/config.js';
+import type { AiConfig } from '../ai/types.js';
 
 const EnvSchema = Type.Object({
   NODE_ENV: Type.Union(
@@ -67,4 +69,9 @@ export function loadEnv(): Env {
   }
 
   return raw;
+}
+
+export function loadAiConfig(): AiConfig {
+  loadEnvFiles();
+  return parseAiConfig(process.env);
 }

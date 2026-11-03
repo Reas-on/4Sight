@@ -62,8 +62,15 @@ export interface DecisionContext {
   readonly signal: AbortSignal;
 }
 
+export interface ProviderProvenance {
+  readonly provider: string;
+  readonly model: string;
+}
+
 export interface DecisionProvider {
   readonly id: string;
+  readonly provenance?: ProviderProvenance;
+  readonly decisionTimeoutMs?: number;
   decide(context: DecisionContext): ProposedDecision | Promise<ProposedDecision>;
 }
 
@@ -96,6 +103,7 @@ export interface PolicyViolation {
 export interface SimulationEvaluation {
   readonly runId: string;
   readonly scenarioId: string;
+  readonly providerProvenance: ProviderProvenance | null;
   readonly status: SimulationStatus;
   readonly outcome: SimulationEvaluationOutcome;
   readonly reasonCode: string;
@@ -117,6 +125,7 @@ export interface SimulationRunSnapshot {
   readonly runId: string;
   readonly scenarioId: string;
   readonly providerId: string;
+  readonly providerProvenance: ProviderProvenance | null;
   readonly status: SimulationStatus;
   readonly createdAt: string;
   readonly updatedAt: string;
