@@ -17,8 +17,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Migration failed: ${message}`);
+main().catch(() => {
+  console.error('Migration failed: check database availability and migration compatibility.');
   process.exitCode = 1;
 });

@@ -9,6 +9,7 @@ import {
   validateIncrement,
 } from './fields.js';
 import { freezeWorldState } from './state.js';
+import { assertBoundedNarrativeData } from './limits.js';
 import type {
   AssetClassification,
   Effect,
@@ -235,6 +236,9 @@ export function validateEffectDefinition(effect: Effect, path: string): void {
 }
 
 export function applyEffects(world: WorldState, effects: readonly Effect[]): WorldState {
+  assertBoundedNarrativeData(world);
+  assertBoundedNarrativeData(effects);
+  if (effects.length > 32) throw new NarrativeValidationError('Too many effects');
   const draft = toMutableWorldState(world);
 
   effects.forEach((effect, index) => {

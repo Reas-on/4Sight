@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:phase4": "PHASE4_DATABASE_TESTS=true vitest run --fileParallelism=false src/application/simulation/tests",
+    "test:security": "PHASE4_DATABASE_TESTS=true vitest run --fileParallelism=false src/application/simulation/tests src/domain/narrative/tests/security.test.ts src/domain/simulation/tests/evaluation-security.test.ts src/ai/tests/security.test.ts",
     "api:contract": "tsx scripts/export-api-contract.ts",
     "test:phase5-server": "tsx scripts/phase5-test-server.ts",
     "ai:smoke": "tsx src/ai/smoke.ts",

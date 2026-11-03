@@ -6,6 +6,7 @@ import {
   validateFieldValue,
 } from './fields.js';
 import type { Condition, ConditionValue, WorldState } from './types.js';
+import { assertBoundedNarrativeData } from './limits.js';
 
 function readField(world: WorldState, field: string): unknown {
   if (!isScalarWorldField(field)) {
@@ -40,6 +41,11 @@ function assertConditionValue(condition: Condition, value: unknown): ConditionVa
 }
 
 export function evaluateCondition(condition: Condition, world: WorldState): boolean {
+  assertBoundedNarrativeData(condition);
+  return evaluateBoundedCondition(condition, world);
+}
+
+function evaluateBoundedCondition(condition: Condition, world: WorldState): boolean {
   switch (condition.op) {
     case 'equals': {
       const expected = assertConditionValue(condition, condition.value);
@@ -86,7 +92,7 @@ export function evaluateCondition(condition: Condition, world: WorldState): bool
           'Operator "all" requires at least one nested condition',
         );
       }
-      return condition.conditions.every((nested) => evaluateCondition(nested, world));
+      return condition.conditions.every((nested) => evaluateBoundedCondition(nested, world));
     }
     case 'any': {
       if (condition.conditions.length === 0) {
@@ -95,10 +101,10 @@ export function evaluateCondition(condition: Condition, world: WorldState): bool
           'Operator "any" requires at least one nested condition',
         );
       }
-      return condition.conditions.some((nested) => evaluateCondition(nested, world));
+      return condition.conditions.some((nested) => evaluateBoundedCondition(nested, world));
     }
     case 'not':
-      return !evaluateCondition(condition.condition, world);
+      return !evaluateBoundedCondition(condition.condition, world);
     default: {
       const unsupported = condition as { op?: unknown };
       throw new NarrativeConditionError(

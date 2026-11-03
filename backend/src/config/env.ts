@@ -77,6 +77,13 @@ export function loadEnv(): Env {
     throw new Error(`Invalid environment configuration: ${details}`);
   }
 
+  if (raw.SIMULATION_ALLOWED_ORIGIN) {
+    try {
+      const origin = new URL(raw.SIMULATION_ALLOWED_ORIGIN);
+      if (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== raw.SIMULATION_ALLOWED_ORIGIN) throw new Error();
+    } catch { throw new Error('Invalid environment configuration: SIMULATION_ALLOWED_ORIGIN must be an exact HTTP(S) origin'); }
+  }
+
   return raw;
 }
 

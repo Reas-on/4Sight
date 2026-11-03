@@ -1,13 +1,15 @@
 import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
 import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 import type { FastifyError, FastifyInstance, FastifyRequest } from 'fastify';
 import { ApplicationError } from '../application/simulation/contracts.js';
 import type { SimulationService } from '../application/simulation/simulation-service.js';
 import { EventStream } from '../infrastructure/streaming/event-stream.js';
 import { sshBruteForceScenario } from '../domain/narrative/scenarios/ssh-brute-force.js';
 import { AiProviderError } from '../ai/errors.js';
-import { CreateRunSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, ModelListSchema, RunSchema, ScenarioListSchema } from './simulation-schemas.js';
+import { RequestBudget } from './request-budget.js';
+import { CreateRunSchema, CreateRunValidationSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, ModelListSchema, RunSchema, ScenarioListSchema } from './simulation-schemas.js';
 
 const loopback = (ip: string): boolean => ip === '::1' || ip.startsWith('127.') && isIP(ip) === 4 || ip.startsWith('::ffff:127.');
 
@@ -21,6 +23,7 @@ export interface SimulationRouteOptions {
 export async function simulationRoutes(app: FastifyInstance, options: SimulationRouteOptions): Promise<void> {
   const streams = new EventStream();
   const repo = options.service.repository;
+  const budget = new RequestBudget();
   const guard = (request: FastifyRequest): void => {
     if (!options.accessToken && !loopback(request.ip)) throw new ApplicationError('LOCAL_ACCESS_REQUIRED', 403);
     if (options.accessToken) {
@@ -45,10 +48,20 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
       throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
     }
     if (request.headers['sec-fetch-site'] === 'cross-site') throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
+    if (request.headers['sec-fetch-site'] === 'same-site' && origin === undefined) {
+      throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
+    }
+    budget.accept(request.ip, request.method === 'POST' && request.routeOptions.url === '/api/v1/runs');
+    const contentType = request.headers['content-type'];
+    if (request.method === 'POST' && contentType && contentType.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
+      throw new ApplicationError('UNSUPPORTED_CONTENT_TYPE', 415);
+    }
   };
   const authorizeRun = async (request: FastifyRequest<{ Params: { id: string } }>): Promise<void> => {
     const cookieName = `fourSightRun_${request.params.id}=`;
-    const cookie = request.headers.cookie?.split(';').map((part) => part.trim()).find((part) => part.startsWith(cookieName))?.slice(cookieName.length);
+    const matches = request.headers.cookie?.split(';').map((part) => part.trim()).filter((part) => part.startsWith(cookieName)) ?? [];
+    if (matches.length > 1) throw new ApplicationError('RUN_ACCESS_DENIED', 401);
+    const cookie = matches[0]?.slice(cookieName.length);
     const token = request.headers['x-run-token'] ?? cookie;
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new ApplicationError('RUN_ACCESS_DENIED', 401);
     await repo.authorize(request.params.id, token);
@@ -64,6 +77,7 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
     else if (error instanceof AiProviderError) { status = 503; code = error.code; }
     else if (httpError.validation) { status = 400; code = 'INVALID_REQUEST'; }
     else if (httpError.statusCode === 413) { status = 413; code = 'PAYLOAD_TOO_LARGE'; }
+    else if (httpError.statusCode === 415) { status = 415; code = 'UNSUPPORTED_CONTENT_TYPE'; }
     else if (httpError.statusCode === 400) { status = 400; code = 'INVALID_REQUEST'; }
     void reply.code(status).send({ error: { code, message: code } });
   });
@@ -79,7 +93,10 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
 
   app.post<{ Body: { scenarioId: string; initialVariant: 'externalSource' | 'protectedInternalSource'; providerId?: string; modelId?: string | null; additionalContext?: string } }>('/api/v1/runs', {
     bodyLimit: 12288, schema: { body: CreateRunSchema, querystring: EmptyQuery,
-      response: { 202: Type.Object({ run: RunSchema, accessToken: Type.String() }), ...ErrorResponses } },
+      response: { 202: Type.Object({ run: RunSchema }), ...ErrorResponses } },
+    preValidation: async (request) => {
+      if (!Value.Check(CreateRunValidationSchema, request.body)) throw new ApplicationError('INVALID_REQUEST', 400);
+    },
   }, async (request, reply) => {
     if ((request.body.providerId === undefined) !== (request.body.modelId === undefined)) throw new ApplicationError('INVALID_MODEL_SELECTION', 400);
     if (request.body.additionalContext?.trim()) throw new ApplicationError('UNSUPPORTED_ADDITIONAL_CONTEXT', 400);
@@ -90,7 +107,7 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
     const result = await options.service.create(request.body.scenarioId, request.body.initialVariant, selection);
     const secureCookie = request.protocol === 'https' || options.allowedOrigin?.startsWith('https://');
     reply.header('Set-Cookie', `fourSightRun_${result.run.id}=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/api/v1/runs/${result.run.id}; Max-Age=604800${secureCookie ? '; Secure' : ''}`);
-    return reply.code(202).send(result);
+    return reply.code(202).send({ run: result.run });
   });
 
   app.get<{ Params: { id: string } }>('/api/v1/runs/:id', {
@@ -102,7 +119,10 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
     app.post<{ Params: { id: string } }>(`/api/v1/runs/:id/${action}`, {
       bodyLimit: 128,
       schema: { params: IdParams, querystring: EmptyQuery, body: Type.Optional(EmptyQuery), response: { 200: RunSchema, ...ErrorResponses } },
-      preValidation: async (request) => { if (request.body === undefined) request.body = {}; },
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+        if (!Value.Check(EmptyQuery, request.body)) throw new ApplicationError('INVALID_REQUEST', 400);
+      },
       preHandler: authorizeRun,
     }, async (request) => options.service.control(request.params.id, action));
   }
@@ -136,6 +156,6 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
     reply.hijack();
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' });
     reply.raw.flushHeaders();
-    await streams.stream(repo, run.id, after, reply.raw);
+    await streams.stream(repo, run.id, after, reply.raw, () => authorizeRun(request));
   });
 }

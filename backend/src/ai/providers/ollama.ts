@@ -59,7 +59,7 @@ export class OllamaDecisionProvider implements AiDecisionProvider {
           !('message' in envelope) || typeof envelope.message !== 'object' || envelope.message === null ||
           !('role' in envelope.message) || envelope.message.role !== 'assistant' ||
           !('content' in envelope.message) || typeof envelope.message.content !== 'string' ||
-          ('tool_calls' in envelope.message && Array.isArray(envelope.message.tool_calls) && envelope.message.tool_calls.length > 0) ||
+          ('tool_calls' in envelope.message && (!Array.isArray(envelope.message.tool_calls) || envelope.message.tool_calls.length > 0)) ||
           ('done_reason' in envelope && envelope.done_reason !== 'stop') || 'error' in envelope) {
         throw new AiProviderError('INVALID_AI_OUTPUT');
       }

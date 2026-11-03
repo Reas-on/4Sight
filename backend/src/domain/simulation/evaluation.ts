@@ -1,6 +1,7 @@
 import type { NarrativeState } from '../narrative/types.js';
 import type { RefereePolicySet } from '../referee/types.js';
 import type { DecisionProvider, SimulationRecord, SimulationStatus } from './types.js';
+import { SimulationError } from './errors.js';
 import type {
   PolicyViolation,
   SimulationEvaluation,
@@ -28,8 +29,26 @@ export function buildSimulationEvaluation(
   const policyViolations: PolicyViolation[] = [];
   let approvedDecisions = 0;
   let rejectedDecisions = 0;
+  let stateVersion = 0;
 
-  runtime.records.forEach((record) => {
+  runtime.records.forEach((record, index) => {
+    if (record.referee.decisionId !== record.decision.decisionId ||
+        record.referee.storyletId !== record.decision.storyletId || record.referee.outcomeId !== record.decision.outcomeId ||
+        record.transition && (record.transition.storyletId !== record.decision.storyletId || record.transition.outcomeId !== record.decision.outcomeId) ||
+        record.referee.approved && record.referee.violatedPolicies.length > 0 ||
+        !record.referee.approved && record.referee.violatedPolicies.length === 0) {
+      throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Referee and decision evidence are inconsistent');
+    }
+    if (record.sequence !== index + 1 || record.referee.stateVersion !== stateVersion ||
+        record.transition && (record.transition.previousStateVersion !== stateVersion ||
+          record.transition.nextStateVersion !== stateVersion + 1 || record.transition.sequence !== stateVersion + 1)) {
+      throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision and transition versions are inconsistent');
+    }
+    if (record.transition) stateVersion++;
+    if (record.referee.approved !== (record.referee.verdict === 'APPROVED') ||
+        !record.referee.approved && record.transition !== null) {
+      throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision evidence is inconsistent');
+    }
     if (record.referee.approved) {
       approvedDecisions += 1;
       return;
@@ -48,6 +67,17 @@ export function buildSimulationEvaluation(
       );
     });
   });
+
+  if (stateVersion !== runtime.narrative.version || stateVersion !== runtime.narrative.step) {
+    throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Final narrative version differs from committed evidence');
+  }
+
+  if (outcome === 'PASS' && (runtime.status !== 'COMPLETED' || !runtime.narrative.terminal ||
+      approvedDecisions === 0 || rejectedDecisions > 0 || runtime.records.some((record) => record.transition === null)) ||
+      outcome === 'FAIL' && rejectedDecisions === 0 ||
+      (runtime.status === 'CANCELLED' || runtime.status === 'FAILED') && outcome !== 'INCONCLUSIVE') {
+    throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Evaluation outcome does not match execution evidence');
+  }
 
   return Object.freeze({
     runId: runtime.runId,

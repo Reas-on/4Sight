@@ -18,6 +18,7 @@ interface DatabasePluginOptions {
 export const databasePlugin = fp<DatabasePluginOptions>(
   async (app, options) => {
     const pool = createPool(options.env);
+    pool.on('error', () => app.log.error({ code: 'DATABASE_POOL_ERROR' }, 'database pool connection failed'));
     const db = createDatabase(pool);
 
     app.decorate('pool', pool);

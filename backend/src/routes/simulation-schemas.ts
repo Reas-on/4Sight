@@ -65,7 +65,11 @@ export const CreateRunSchema = Type.Object({
   additionalContext: Type.Optional(Type.String({ maxLength: 8000 })),
 }, { additionalProperties: false });
 export type CreateRunRequest = Static<typeof CreateRunSchema>;
-export const ErrorResponses = Object.fromEntries([400, 401, 403, 404, 409, 413, 429, 500, 503].map((code) => [code, ErrorSchema]));
+export const CreateRunValidationSchema = Type.Object({
+  ...CreateRunSchema.properties,
+  modelId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+}, { additionalProperties: false });
+export const ErrorResponses = Object.fromEntries([400, 401, 403, 404, 409, 413, 415, 429, 500, 503].map((code) => [code, ErrorSchema]));
 
 export const AuditEventSchema = Type.Object({
   id: Type.String({ format: 'uuid' }), runId: Type.String({ format: 'uuid' }),

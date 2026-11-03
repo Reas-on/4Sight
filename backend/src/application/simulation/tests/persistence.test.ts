@@ -82,6 +82,10 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
       const snapshots = await pool.query('select count(*)::int as count from simulation_snapshots where run_id=$1', [created.id]);
       expect(snapshots.rows[0].count).toBe(1);
     } finally { await pool.query(`alter table simulation_events drop constraint ${constraint}`); }
+    const recovered = await repo.commitDecision(created.id, running.revision, 0, EXTERNAL_SOURCE_DECISIONS[0]);
+    expect(recovered.narrative.version).toBe(1);
+    expect(recovered.records).toHaveLength(1);
+    expect((await repo.events(created.id, 0)).filter((event) => event.eventType === 'transition.committed')).toHaveLength(1);
   });
 
   it('persists meaningful PASS and policy FAIL with final evidence and immutable terminal runs', async () => {
@@ -91,6 +95,13 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
       run = await repo.commitDecision(run.id, run.revision, run.narrative.version, decision);
     }
     expect(run.evaluation).toMatchObject({ outcome: 'PASS', approvedDecisions: 3, terminal: true });
+    const trace = await pool.query(`select
+      (select count(*)::int from simulation_decisions where run_id=$1) as decisions,
+      (select count(*)::int from simulation_snapshots where run_id=$1) as snapshots,
+      (select count(*)::int from simulation_events e join simulation_snapshots s on s.run_id=e.run_id and s.state_version=e.state_version
+        where e.run_id=$1 and e.event_type='transition.committed') as audited_transitions,
+      (select evaluation->>'outcome' from simulation_evaluations where run_id=$1) as outcome`, [run.id]);
+    expect(trace.rows[0]).toEqual({ decisions: 3, snapshots: 4, audited_transitions: 3, outcome: 'PASS' });
     await expect(repo.lifecycle(run.id, 'cancel')).rejects.toMatchObject({ code: 'INVALID_LIFECYCLE_TRANSITION' });
     await expect(repo.commitDecision(run.id, run.revision, run.narrative.version, EXTERNAL_SOURCE_DECISIONS[0]))
       .rejects.toMatchObject({ code: 'STALE_RUN_REVISION' });
@@ -103,6 +114,10 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
     expect(unsafe.evaluation).toMatchObject({ outcome: 'FAIL', approvedDecisions: 1, rejectedDecisions: 1 });
     expect(unsafe.narrative.version).toBe(1);
     expect(unsafe.records[1]?.referee.violatedPolicies.map((policy) => policy.policyId)).toContain('POLICY-002');
+    const [stored] = (await pool.query('select evaluation from simulation_evaluations where run_id=$1', [unsafe.id])).rows;
+    await pool.query("update simulation_evaluations set evaluation=jsonb_set(evaluation,'{outcome}','\"PASS\"') where run_id=$1", [unsafe.id]);
+    await expect(repo.read(unsafe.id)).rejects.toMatchObject({ code: 'PERSISTED_EVIDENCE_MISMATCH' });
+    await pool.query('update simulation_evaluations set evaluation=$2 where run_id=$1', [unsafe.id, stored.evaluation]);
   });
 
   it('pause/resume fences a stale worker even when state version has not changed', async () => {

@@ -15,12 +15,20 @@ export interface SimulationPluginOptions {
   providerFactory?: ProviderFactory;
 }
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    simulationReady?: () => boolean;
+  }
+}
+
 export const simulationPlugin = fp<SimulationPluginOptions>(async (app, { env, providerFactory }) => {
   if (!['127.0.0.1', 'localhost', '::1'].includes(env.HOST) && !env.SIMULATION_ACCESS_TOKEN) {
     throw new ApplicationError('SIMULATION_ACCESS_TOKEN_REQUIRED', 503);
   }
+  if (env.DB_POOL_MAX < 2) throw new ApplicationError('SIMULATION_POOL_TOO_SMALL', 503);
   let service: SimulationService;
   const transactions = new TransactionManager(app.pool, () => service?.abort());
+  app.decorate('simulationReady', () => transactions.isReady());
   const repository = new PostgresSimulationRepository(transactions);
   const ai = loadAiConfig();
   const fixtureMode = env.SIMULATION_MODE === 'fixture';

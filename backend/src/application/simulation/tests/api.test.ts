@@ -29,7 +29,10 @@ describe.skipIf(!enabled)('Phase 4 live HTTP and PostgreSQL API/SSE', () => {
       body: JSON.stringify({ scenarioId: 'ssh-brute-force', initialVariant: variant }),
     });
     expect(response.status).toBe(202);
-    return response.json() as Promise<{ run: { id: string }; accessToken: string }>;
+    const body = await response.json() as { run: { id: string }; accessToken?: string };
+    expect(body.accessToken).toBeUndefined();
+    const accessToken = response.headers.get('set-cookie')!.split(';')[0]!.split('=')[1]!;
+    return { run: body.run, accessToken };
   };
   const headers = (token: string) => ({ 'x-run-token': token });
 

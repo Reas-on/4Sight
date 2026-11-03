@@ -17,7 +17,7 @@ export const simulationApi = {
   models: (signal?: AbortSignal) => request<{ models: ModelOption[] }>("/models", "models", {}, signal),
   create: async (input: RunInput, signal?: AbortSignal) => {
     validate("create", input);
-    const result = await request<{ run: DurableRun; accessToken: string }>("/runs", "created", { method: "POST", body: JSON.stringify(input) }, signal);
+    const result = await request<{ run: DurableRun }>("/runs", "created", { method: "POST", body: JSON.stringify(input) }, signal);
     return result.run;
   },
   snapshot: (id: string, signal?: AbortSignal) => runResponse(idPath(id), id, {}, signal),

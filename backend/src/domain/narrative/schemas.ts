@@ -3,6 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import { assertConditionReferences } from './conditions.js';
 import { validateEffectDefinition } from './effects.js';
 import { NarrativeValidationError } from './errors.js';
+import { assertBoundedNarrativeData } from './limits.js';
 import {
   ASSET_CLASSIFICATIONS,
   ESCALATION_STATUSES,
@@ -19,7 +20,7 @@ function stringEnum(values: readonly string[]): TSchema {
   return Type.Union(values.map((value) => Type.Literal(value)));
 }
 
-const EventIdSchema = Type.String({ pattern: '^event:[a-z0-9-]+$' });
+const EventIdSchema = Type.String({ pattern: '^event:[a-z0-9-]+$', maxLength: 200 });
 const ConditionValueSchema = Type.Union([Type.String(), Type.Number(), Type.Boolean()]);
 
 export const WorldStateSchema = Type.Object(
@@ -76,14 +77,14 @@ const ConditionSchema = Type.Recursive(
       Type.Object(
         {
           op: Type.Literal('all'),
-          conditions: Type.Array(This, { minItems: 1 }),
+          conditions: Type.Array(This, { minItems: 1, maxItems: 32 }),
         },
         { additionalProperties: false },
       ),
       Type.Object(
         {
           op: Type.Literal('any'),
-          conditions: Type.Array(This, { minItems: 1 }),
+          conditions: Type.Array(This, { minItems: 1, maxItems: 32 }),
         },
         { additionalProperties: false },
       ),
@@ -128,8 +129,8 @@ const EffectSchema = Type.Union([
 const StoryletOutcomeSchema = Type.Object(
   {
     id: Type.String({ pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }),
-    description: Type.String({ minLength: 1 }),
-    effects: Type.Array(EffectSchema, { minItems: 1 }),
+    description: Type.String({ minLength: 1, maxLength: 4000 }),
+    effects: Type.Array(EffectSchema, { minItems: 1, maxItems: 32 }),
   },
   { additionalProperties: false },
 );
@@ -137,7 +138,7 @@ const StoryletOutcomeSchema = Type.Object(
 const StoryletDefinitionSchema = Type.Object(
   {
     id: Type.String({ pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }),
-    description: Type.String({ minLength: 1 }),
+    description: Type.String({ minLength: 1, maxLength: 4000 }),
     graphNodeId: Type.Optional(Type.String({ minLength: 1 })),
     priority: Type.Integer({ minimum: -1000, maximum: 1000 }),
     oneShot: Type.Boolean(),
@@ -150,7 +151,7 @@ const StoryletDefinitionSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
-    outcomes: Type.Array(StoryletOutcomeSchema, { minItems: 1 }),
+    outcomes: Type.Array(StoryletOutcomeSchema, { minItems: 1, maxItems: 16 }),
   },
   { additionalProperties: false },
 );
@@ -162,7 +163,7 @@ export const ScenarioDefinitionSchema = Type.Object(
     description: Type.String({ minLength: 1 }),
     technique: Type.String({ minLength: 1 }),
     maxTransitions: Type.Integer({ minimum: 1, maximum: 100 }),
-    storylets: Type.Array(StoryletDefinitionSchema, { minItems: 1 }),
+    storylets: Type.Array(StoryletDefinitionSchema, { minItems: 1, maxItems: 100 }),
   },
   { additionalProperties: false },
 );
@@ -185,9 +186,9 @@ export const NarrativeStateSchema = Type.Object(
     scenarioId: Type.String({ minLength: 1 }),
     initialWorld: WorldStateSchema,
     world: WorldStateSchema,
-    version: Type.Integer({ minimum: 0 }),
-    step: Type.Integer({ minimum: 0 }),
-    completedStorylets: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
+    version: Type.Integer({ minimum: 0, maximum: 100 }),
+    step: Type.Integer({ minimum: 0, maximum: 100 }),
+    completedStorylets: Type.Array(Type.String({ minLength: 1, maxLength: 200 }), { uniqueItems: true, maxItems: 100 }),
     currentStoryletId: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
     terminal: Type.Boolean(),
   },
@@ -201,6 +202,7 @@ function formatSchemaErrors(schema: TSchema, value: unknown): string[] {
 }
 
 function assertSchema(schema: TSchema, value: unknown, label: string): void {
+  assertBoundedNarrativeData(value);
   if (!Value.Check(schema, value)) {
     throw new NarrativeValidationError(
       `Invalid ${label}`,

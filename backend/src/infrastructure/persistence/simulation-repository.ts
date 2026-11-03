@@ -26,7 +26,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
     return row;
   }
 
-  private async hydrate(tx: Transaction, row: RunRow): Promise<DurableRun> {
+  private async hydrate(tx: Transaction, row: RunRow, finalizing = false): Promise<DurableRun> {
     const [snapshot] = await tx.select().from(tables.simulationSnapshots).where(and(
       eq(tables.simulationSnapshots.runId, row.id), eq(tables.simulationSnapshots.stateVersion, row.currentStateVersion),
     ));
@@ -34,6 +34,28 @@ export class PostgresSimulationRepository implements SimulationRepository {
     const records = await tx.select().from(tables.simulationDecisions)
       .where(eq(tables.simulationDecisions.runId, row.id)).orderBy(asc(tables.simulationDecisions.stepSequence));
     const [evaluation] = await tx.select().from(tables.simulationEvaluations).where(eq(tables.simulationEvaluations.runId, row.id));
+    if (!finalizing && isTerminalStatus(row.status) !== Boolean(evaluation)) {
+      throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+    }
+    if (snapshot.narrative.version !== row.currentStateVersion || snapshot.narrative.step !== row.currentStep ||
+        snapshot.narrative.scenarioId !== row.scenarioId || records.some((item, index) => item.stepSequence !== index + 1) ||
+        records.filter((item) => item.record.transition !== null).length !== row.currentStateVersion ||
+        evaluation && (evaluation.evaluation.status !== row.status || evaluation.evaluation.finalStateVersion !== row.currentStateVersion)) {
+      throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+    }
+    if (evaluation) {
+      try {
+        const verified = buildSimulationEvaluation({
+          runId: row.id, scenario: row.configuration.scenario, provider: {}, status: row.status,
+          narrative: snapshot.narrative, records: records.map((item) => item.record),
+          startedAt: row.startedAt, policySet: DEFAULT_REFEREE_POLICY_SET,
+        }, evaluation.evaluation.outcome, evaluation.evaluation.reasonCode, evaluation.evaluation.summary, evaluation.createdAt);
+        if (verified.outcome !== row.evaluationOutcome || verified.totalDecisions !== evaluation.evaluation.totalDecisions ||
+            verified.approvedDecisions !== evaluation.evaluation.approvedDecisions || verified.rejectedDecisions !== evaluation.evaluation.rejectedDecisions) {
+          throw new Error('Counts differ');
+        }
+      } catch { throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500); }
+    }
     return {
       id: row.id, configuration: row.configuration, status: row.status, revision: row.revision,
       eventSequence: row.eventSequence, narrative: validateNarrativeState(snapshot.narrative),
@@ -67,7 +89,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
     row.status = status;
     row.evaluationOutcome = outcome;
     row.completedAt = new Date().toISOString();
-    const run = await this.hydrate(tx, row);
+    const run = await this.hydrate(tx, row, true);
     const evaluation = buildSimulationEvaluation({
       runId: row.id, scenario: row.configuration.scenario,
       provider: row.modelId ? { provenance: { provider: row.providerId, model: row.modelId } } : {},
@@ -104,7 +126,8 @@ export class PostgresSimulationRepository implements SimulationRepository {
   authorize(id: string, token: string): Promise<void> {
     return this.transactions.transaction(async (tx) => {
       const row = await this.row(tx, id);
-      if (!timingSafeEqual(Buffer.from(row.accessHash, 'hex'), Buffer.from(tokenHash(token), 'hex'))) {
+      if (Date.parse(row.accessExpiresAt) <= Date.now() ||
+          !timingSafeEqual(Buffer.from(row.accessHash, 'hex'), Buffer.from(tokenHash(token), 'hex'))) {
         throw new ApplicationError('RUN_NOT_FOUND', 404);
       }
     });

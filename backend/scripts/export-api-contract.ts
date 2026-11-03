@@ -6,7 +6,7 @@ const contract = {
   run: RunSchema,
   event: AuditEventSchema,
   create: CreateRunSchema,
-  created: Type.Object({ run: RunSchema, accessToken: Type.String({ pattern: '^[a-f0-9]{64}$' }) }),
+  created: Type.Object({ run: RunSchema }),
   result: Type.Object({ evaluation: EvaluationSchema, ruleAdherence: Type.Union([Type.Number(), Type.Null()]) }),
   scenarios: ScenarioListSchema,
   models: ModelListSchema,

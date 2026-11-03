@@ -14,10 +14,12 @@ export class EventStream {
     response.once('close', () => this.clients.delete(response));
   }
 
-  async stream(repository: SimulationRepository, runId: string, cursor: number, response: ServerResponse): Promise<void> {
+  async stream(repository: SimulationRepository, runId: string, cursor: number, response: ServerResponse,
+    authorize: () => Promise<void> = async () => undefined): Promise<void> {
     let lastHeartbeat = Date.now();
     try {
       while (!response.destroyed && !response.writableEnded) {
+        await authorize();
         const events = await repository.events(runId, cursor);
         for (const event of events) {
           if (response.destroyed || response.writableEnded) return;

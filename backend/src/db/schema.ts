@@ -13,6 +13,8 @@ export const appMetadata = pgTable('app_metadata', {
 export const simulationRuns = pgTable('simulation_runs', {
   id: uuid('id').primaryKey(),
   accessHash: text('access_hash').notNull(),
+  accessExpiresAt: timestamp('access_expires_at', { withTimezone: true, mode: 'string' }).notNull()
+    .default(sql`now() + interval '7 days'`),
   scenarioId: text('scenario_id').notNull(),
   scenarioVersion: text('scenario_version').notNull(),
   providerId: text('provider_id').notNull(),

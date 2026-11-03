@@ -23,7 +23,7 @@ function retryDelay(ms: number, signal: AbortSignal): Promise<void> {
 
 export function withSignal<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    const aborted = (): void => reject(signal.reason);
+    const aborted = (): void => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
     if (signal.aborted) { aborted(); return; }
     signal.addEventListener('abort', aborted, { once: true });
     Promise.resolve().then(() => {

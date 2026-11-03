@@ -33,6 +33,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       },
     },
     trustProxy: false,
+    requestTimeout: 15_000,
+    bodyLimit: 12_288,
     forceCloseConnections: true,
   });
 
@@ -43,11 +45,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...(options.simulationProviderFactory ? { providerFactory: options.simulationProviderFactory } : {}) });
   }
 
-  app.setNotFoundHandler((request, reply) => {
+  app.setNotFoundHandler((_request, reply) => {
     void reply.code(404).send({
       error: {
         code: 'NOT_FOUND',
-        message: `Route ${request.method} ${request.url} not found`,
+        message: 'Route not found',
       },
     });
   });
@@ -57,13 +59,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     const isServerError = statusCode >= 500;
 
     if (isServerError) {
-      request.log.error({ err: error }, 'request failed');
+      request.log.error({ code: 'INTERNAL_SERVER_ERROR', statusCode }, 'request failed');
     } else {
-      request.log.warn({ err: error }, 'request rejected');
+      request.log.warn({ code: error.code ?? 'REQUEST_ERROR', statusCode }, 'request rejected');
     }
 
     const message =
-      isServerError && env.NODE_ENV === 'production' ? 'Internal Server Error' : error.message;
+      isServerError ? 'Internal Server Error' : 'Request rejected';
 
     void reply.code(statusCode).send({
       error: {

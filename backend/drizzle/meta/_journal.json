@@ -15,6 +15,13 @@
       "when": 1793708854684,
       "tag": "0001_curved_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793718207115,
+      "tag": "0002_groovy_starfox",
+      "breakpoints": true
     }
   ]
 }

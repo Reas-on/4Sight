@@ -12,6 +12,7 @@ export function createPool(env: Env): Pool {
     connectionTimeoutMillis: env.DB_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: env.DB_IDLE_TIMEOUT_MS,
     application_name: '4sight-backend',
+    statement_timeout: 10_000,
   });
 }
 

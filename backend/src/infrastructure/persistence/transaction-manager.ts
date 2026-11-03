@@ -44,6 +44,10 @@ export class TransactionManager {
     return bounded;
   }
 
+  isReady(): boolean {
+    return this.alive && this.accepting;
+  }
+
   async close(): Promise<void> {
     this.accepting = false;
     await this.tail.catch(() => undefined);
