@@ -11,6 +11,17 @@ npm run dev
 
 Open the local URL printed by Vite. `npm run build` runs TypeScript and the production build. `npm test` runs the interaction tests.
 
+For the standard integrated local demo, open **http://localhost:5173** and set
+`SIMULATION_ALLOWED_ORIGIN=http://localhost:5173` in the backend environment (the
+`.env.example` default). Browser REST and SSE requests use relative `/api/v1/...`
+paths through the existing Vite proxy to `http://127.0.0.1:3001`. The proxy preserves
+the browser's Host and Origin; the backend validates the exact configured origin.
+`http://127.0.0.1:5173` is a different origin and is rejected unless explicitly
+configured instead. Restart the backend after changing its environment, including
+any launch-time `SIMULATION_ALLOWED_ORIGIN` override. Keep Gemini credentials only
+in the ignored backend environment. Run cookies remain HttpOnly, SameSite=Strict
+and scoped to `/api/v1/runs/<run UUID>`; HTTP localhost does not use Secure cookies.
+
 Focused backend/browser acceptance: after local database migrations, run `npm run test:phase5`. It starts a test-only delayed fixture backend and Vite, exercising actual PostgreSQL and SSE. On NixOS, supply a compatible browser via `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` and its runtime library environment. Historical browser specs describe the old offline demonstration; the Phase 5 suite targets the current authoritative path.
 
 ## Controls
