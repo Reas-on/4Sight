@@ -1,7 +1,13 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { and, asc, eq, gt } from 'drizzle-orm';
 import * as tables from '../../db/schema.js';
-import { initializeScenario, resolveNextStorylet } from '../../domain/narrative/engine.js';
+import { advanceNarrative, initializeScenario, resolveNextStorylet } from '../../domain/narrative/engine.js';
+import { beginnerContext, beginnerInitialStates, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
+import { evaluateDecision } from '../../domain/referee/evaluator.js';
+import type { TransitionRecord } from '../../domain/narrative/types.js';
+import type { ProposedDecision } from '../../domain/referee/types.js';
+import { redact } from '../../ai/prompt.js';
 import { sshBruteForceInitialStates } from '../../domain/narrative/scenarios/ssh-brute-force.js';
 import { validateNarrativeState } from '../../domain/narrative/schemas.js';
 import { DEFAULT_REFEREE_POLICY_SET } from '../../domain/referee/policies.js';
@@ -34,12 +40,37 @@ export class PostgresSimulationRepository implements SimulationRepository {
     const records = await tx.select().from(tables.simulationDecisions)
       .where(eq(tables.simulationDecisions.runId, row.id)).orderBy(asc(tables.simulationDecisions.stepSequence));
     const [evaluation] = await tx.select().from(tables.simulationEvaluations).where(eq(tables.simulationEvaluations.runId, row.id));
+    const workflowEvents = isBeginner(row.configuration.scenario) ? await tx.select().from(tables.simulationEvents)
+      .where(eq(tables.simulationEvents.runId, row.id)).orderBy(asc(tables.simulationEvents.sequence)) : null;
+    const workflow = workflowEvents ? {
+      proposal: (workflowEvents.find(event => event.eventType === 'decision.proposed')?.payload.proposal ?? null) as ProposedDecision | null,
+      transitions: workflowEvents.filter(event => event.eventType === 'transition.committed').map(event => event.payload.transition as TransitionRecord),
+    } : undefined;
+    if (workflow) {
+      let replay = initializeScenario(row.configuration.scenario, snapshot.narrative.initialWorld);
+      for (const transition of workflow.transitions) {
+        const gate = resolveNextStorylet(replay, row.configuration.scenario);
+        const record = records[0]?.record;
+        if (gate.status !== 'eligible' || gate.storylet.id !== transition.storyletId) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+        if (gate.storylet.graphNodeId === 'N-06') {
+          if (!workflow.proposal || !record || !isDeepStrictEqual(record.decision, workflow.proposal) ||
+              !isDeepStrictEqual(record.referee, evaluateDecision(workflow.proposal, replay, row.configuration.scenario)) ||
+              transition.outcomeId !== (record.referee.approved ? record.decision.outcomeId : 'response-rejected') ||
+              record.referee.approved && !isDeepStrictEqual(record.transition, transition) ||
+              !record.referee.approved && record.transition !== null) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+        }
+        const next = advanceNarrative(replay, row.configuration.scenario, { storyletId: transition.storyletId, outcomeId: transition.outcomeId });
+        if (next.status !== 'advanced' || !isDeepStrictEqual(next.record, transition)) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+        replay = next.state;
+      }
+      if (!isDeepStrictEqual(replay, snapshot.narrative)) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+    }
     if (!finalizing && isTerminalStatus(row.status) !== Boolean(evaluation)) {
       throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
     }
     if (snapshot.narrative.version !== row.currentStateVersion || snapshot.narrative.step !== row.currentStep ||
         snapshot.narrative.scenarioId !== row.scenarioId || records.some((item, index) => item.stepSequence !== index + 1) ||
-        records.filter((item) => item.record.transition !== null).length !== row.currentStateVersion ||
+        (workflow ? workflow.transitions.length : records.filter((item) => item.record.transition !== null).length) !== row.currentStateVersion ||
         evaluation && (evaluation.evaluation.status !== row.status || evaluation.evaluation.finalStateVersion !== row.currentStateVersion)) {
       throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
     }
@@ -49,6 +80,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
           runId: row.id, scenario: row.configuration.scenario, provider: {}, status: row.status,
           narrative: snapshot.narrative, records: records.map((item) => item.record),
           startedAt: row.startedAt, policySet: DEFAULT_REFEREE_POLICY_SET,
+          ...(workflow ? { workflowTransitions: workflow.transitions } : {}),
         }, evaluation.evaluation.outcome, evaluation.evaluation.reasonCode, evaluation.evaluation.summary, evaluation.createdAt);
         if (verified.outcome !== row.evaluationOutcome || verified.totalDecisions !== evaluation.evaluation.totalDecisions ||
             verified.approvedDecisions !== evaluation.evaluation.approvedDecisions || verified.rejectedDecisions !== evaluation.evaluation.rejectedDecisions) {
@@ -62,6 +94,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       records: records.map((item) => item.record), evaluation: evaluation?.evaluation ?? null,
       error: row.failure, createdAt: row.createdAt, startedAt: row.startedAt,
       completedAt: row.completedAt, updatedAt: row.updatedAt,
+      ...(workflow ? { workflow } : {}),
     };
   }
 
@@ -95,6 +128,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       provider: row.modelId ? { provenance: { provider: row.providerId, model: row.modelId } } : {},
       status, records: run.records, narrative: run.narrative,
       startedAt: row.startedAt, policySet: DEFAULT_REFEREE_POLICY_SET,
+      ...(run.workflow ? { workflowTransitions: run.workflow.transitions } : {}),
     }, outcome, code, code, row.completedAt);
     await tx.insert(tables.simulationEvaluations).values({ runId: row.id, evaluation });
     await this.append(tx, row, 'run.finished', { status, outcome, reasonCode: code });
@@ -102,8 +136,8 @@ export class PostgresSimulationRepository implements SimulationRepository {
 
   create(configuration: RunConfiguration, token: string): Promise<DurableRun> {
     return this.transactions.transaction(async (tx) => {
-      const narrative = initializeScenario(configuration.scenario,
-        configuration.initialVariant === 'externalSource'
+      const narrative = initializeScenario(configuration.scenario, isBeginner(configuration.scenario)
+        ? beginnerInitialStates[configuration.initialVariant] : configuration.initialVariant === 'externalSource'
           ? sshBruteForceInitialStates.externalSource : sshBruteForceInitialStates.protectedInternalSource);
       const id = randomUUID();
       const [row] = await tx.insert(tables.simulationRuns).values({
@@ -152,6 +186,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
   commitDecision(id: string, revision: number, stateVersion: number, decision: unknown): Promise<DurableRun> {
     return this.transactions.transaction(async (tx) => {
       const row = await this.row(tx, id, true);
+      if (isBeginner(row.configuration.scenario)) throw new ApplicationError('WORKFLOW_COMMIT_REQUIRED', 409);
       if (row.status !== 'RUNNING' || row.revision !== revision || row.currentStateVersion !== stateVersion) {
         throw new ApplicationError('STALE_RUN_REVISION', 409);
       }
@@ -188,6 +223,70 @@ export class PostgresSimulationRepository implements SimulationRepository {
         row.failure = { code: result.error.code, message: 'Narrative transition failed.', phase: 'narrative' };
         await this.finish(tx, row, 'FAILED', 'INCONCLUSIVE', 'NARRATIVE_ERROR');
       } else if (result.state.terminal) await this.finish(tx, row, 'COMPLETED', 'PASS', 'RUN_COMPLETED');
+      await this.saveRow(tx, row);
+      return this.hydrate(tx, await this.row(tx, id));
+    });
+  }
+
+  commitWorkflow(id: string, revision: number, rawProposal?: unknown): Promise<DurableRun> {
+    return this.transactions.transaction(async (tx) => {
+      const row = await this.row(tx, id, true);
+      if (!isBeginner(row.configuration.scenario) || row.status !== 'RUNNING' || row.revision !== revision) {
+        throw new ApplicationError('STALE_RUN_REVISION', 409);
+      }
+      const run = await this.hydrate(tx, row);
+      const resolution = resolveNextStorylet(run.narrative, row.configuration.scenario);
+      if (resolution.status !== 'eligible') throw new ApplicationError('NARRATIVE_DEAD_END', 409);
+      const storylet = resolution.storylet;
+      let outcomeId = 'recorded';
+      let decisionRecord: import('../../domain/simulation/types.js').SimulationRecord | undefined;
+      if (isProposal(storylet)) {
+        // Validate before committing any proposal-stage effect. Only known simulated
+        // identifiers and a bounded public explanation leave the backend.
+        const proposed = validateProposedDecision(rawProposal);
+        const parameters = proposed.parameters ? Object.fromEntries(Object.entries(proposed.parameters).map(([key, value]) =>
+          [key, value === beginnerContext.sourceId || value === beginnerContext.incidentId ? value : `sha256:${tokenHash(value)}`])) : undefined;
+        const proposal = validateProposedDecision({ ...proposed, decisionId: `run-${id}-step-1`, providerId: row.providerId,
+          ...(parameters ? { parameters } : {}),
+          ...(proposed.reasoning ? { reasoning: redact(proposed.reasoning, [process.env.GEMINI_API_KEY ?? '']).slice(0, 600) } : {}),
+        });
+        await this.append(tx, row, 'decision.proposed', { proposal,
+          context: { incident: beginnerContext.incident, targetAsset: beginnerContext.targetAsset,
+            sourceClassification: run.narrative.world.sourceClassification, sourceProtected: run.narrative.world.sourceProtected,
+            assetProtected: run.narrative.world.assetProtected, threatConfidence: run.narrative.world.threatConfidence },
+          availableActions: ['perimeter_block', 'soc_escalation'],
+        }, storylet.id, storylet.graphNodeId ?? null);
+      } else if (storylet.graphNodeId === 'N-06') {
+        const proposal = run.workflow?.proposal;
+        if (!proposal) throw new ApplicationError('PROPOSAL_MISSING', 500);
+        const referee = evaluateDecision(proposal, run.narrative, row.configuration.scenario);
+        outcomeId = referee.approved ? proposal.outcomeId : 'response-rejected';
+        decisionRecord = { sequence: 1, decision: proposal, referee, transition: null, recordedAt: new Date().toISOString() };
+      } else if (storylet.graphNodeId === 'N-07') {
+        if (run.records.length !== 1 || !run.records[0]?.referee.approved || !run.records[0].transition) {
+          throw new ApplicationError('APPROVED_RESPONSE_REQUIRED', 409);
+        }
+      } else if (storylet.graphNodeId === 'N-10' && (run.records.length !== 1 || run.records[0]?.referee.approved)) {
+        throw new ApplicationError('REJECTED_RESPONSE_REQUIRED', 409);
+      }
+      const applied = advanceNarrative(run.narrative, row.configuration.scenario, { storyletId: storylet.id, outcomeId });
+      if (applied.status !== 'advanced') throw new ApplicationError('NARRATIVE_NOT_ADVANCED', 500);
+      if (decisionRecord) {
+        decisionRecord = { ...decisionRecord, transition: decisionRecord.referee.approved ? applied.record : null };
+        await tx.insert(tables.simulationDecisions).values({ id: randomUUID(), runId: id, stepSequence: 1,
+          providerId: row.providerId, modelId: row.modelId, record: decisionRecord });
+        await this.append(tx, row, 'decision.evaluated', { decisionSequence: 1, verdict: decisionRecord.referee.verdict,
+          violatedPolicyIds: decisionRecord.referee.violatedPolicies.map(policy => policy.policyId) }, storylet.id, 'N-06');
+      }
+      await tx.insert(tables.simulationSnapshots).values({ id: randomUUID(), runId: id,
+        stateVersion: applied.state.version, narrative: applied.state });
+      row.currentStateVersion = applied.state.version;
+      row.currentStep = applied.state.step;
+      await this.append(tx, row, 'transition.committed', { transition: applied.record }, storylet.id, storylet.graphNodeId ?? null);
+      if (applied.state.terminal) {
+        const rejected = run.records.some(record => !record.referee.approved);
+        await this.finish(tx, row, 'COMPLETED', rejected ? 'FAIL' : 'PASS', rejected ? 'POLICY_REJECTION' : 'RUN_COMPLETED');
+      }
       await this.saveRow(tx, row);
       return this.hydrate(tx, await this.row(tx, id));
     });

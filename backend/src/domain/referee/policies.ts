@@ -414,6 +414,9 @@ export const DECISION_BINDING_POLICY: RefereePolicy = Object.freeze({
         evidence,
       );
     }
+    if (context.selectedOutcome.id === 'response-rejected') {
+      return finding('FAIL', 'RESERVED_REJECTION_OUTCOME', 'Rejection handling is selected only by the backend after a Referee rejection.', evidence);
+    }
     if (context.expectedActionType === null) {
       return finding(
         'FAIL',

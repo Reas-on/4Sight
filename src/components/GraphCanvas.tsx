@@ -8,7 +8,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { AlertCircle, Crosshair } from "lucide-react";
-import { graph, neighbors, steps, type StepStatus } from "../data/graph";
+import { legacyGraph, statusLabel, type GraphDataset, type StepStatus } from "../data/graph";
 import { nodeColor } from "../data/nodeColors";
 import { INTRO_TIMELINE } from "../data/intro";
 import {
@@ -29,6 +29,7 @@ export type GraphControls = {
   focus: () => void;
 };
 type Props = {
+  dataset?: GraphDataset;
   selectedNodeId: string | null;
   hoveredNodeId: string | null;
   focusedNodeId: string | null;
@@ -52,6 +53,7 @@ type Props = {
 
 const GraphCanvas = memo(
   forwardRef<GraphControls, Props>(function GraphCanvas(props, ref) {
+    const dataset = props.dataset ?? legacyGraph;
     const host = useRef<HTMLDivElement>(null);
     const labelHost = useRef<HTMLDivElement>(null);
     const latest = useRef(props);
@@ -77,6 +79,8 @@ const GraphCanvas = memo(
     );
 
     useEffect(() => {
+      const graph = dataset;
+      const { neighbors, steps } = dataset;
       const container = host.current!;
       let renderer: THREE.WebGLRenderer;
       try {
@@ -197,7 +201,7 @@ const GraphCanvas = memo(
           id.textContent = node.id;
           label.append(dot, name, id);
           labelHost.current!.append(label);
-          return { element: label, mesh: meshes.get(node.id)!, id: node.id };
+          return { element: label, status: id, mesh: meshes.get(node.id)!, id: node.id };
         });
 
       let width = 1;
@@ -542,7 +546,7 @@ const GraphCanvas = memo(
                     ? 0.3
                     : 0.19);
           mesh.material.opacity += (alpha - mesh.material.opacity) * blend;
-          materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses));
+          materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses, dataset));
           const selected =
             executionNode === node.id || state.selectedNodeId === node.id;
           materialColor.lerp(
@@ -622,6 +626,8 @@ const GraphCanvas = memo(
         scene.updateMatrixWorld(true);
         labels.forEach((label) => {
           label.element.dataset.status = state.nodeStatuses?.[label.id] ?? "ready";
+          const text = `${label.id} · ${statusLabel(state.nodeStatuses?.[label.id] ?? "ready")}`;
+          if (label.status.textContent !== text) label.status.textContent = text;
           label.mesh.getWorldPosition(projected);
           projected.project(camera);
           const related =
@@ -676,7 +682,7 @@ const GraphCanvas = memo(
         renderer.dispose();
         renderer.domElement.remove();
       };
-    }, []);
+    }, [dataset]);
 
     return (
       <div ref={host} className="graph-renderer" data-testid="graph-renderer">

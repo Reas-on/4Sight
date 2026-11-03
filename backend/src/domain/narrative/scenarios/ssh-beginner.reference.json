@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "1.0",
+  "kind": "4sight-visual-scenario-proposal",
+  "id": "ssh-login-investigation-beginner",
+  "name": "Suspicious SSH Logins — Beginner Walkthrough",
+  "description": "A simple, visual walkthrough: a server reports repeated failed logins, the AI proposes a response, and an independent Referee checks that response before the simulated incident is closed.",
+  "language": "en",
+  "difficulty": "beginner",
+  "source": "local-file",
+  "executionSupport": "preview-only-until-backend-mapping-is-implemented",
+  "mitre": {
+    "techniques": [
+      { "id": "T1110.001", "name": "Password Guessing" }
+    ]
+  },
+  "initialContext": {
+    "incident": "A server received 25 unsuccessful SSH sign-in attempts within 2 minutes.",
+    "sourceIp": "203.0.113.25",
+    "sourceIsInternal": false,
+    "sourceIsProtected": false,
+    "targetAsset": "demo-web-server",
+    "confidence": 0.93,
+    "notes": "All IPs, users and security actions are simulated. 203.0.113.25 is a documentation-only example address."
+  },
+  "graph": {
+    "direction": "left-to-right",
+    "nodes": [
+      { "id": "N-01", "label": "1. Alert arrives", "kind": "event", "description": "The system detects many failed SSH logins.", "plainLanguage": "Something suspicious happened.", "stage": "Detection" },
+      { "id": "N-02", "label": "2. Collect facts", "kind": "investigation", "description": "Read the source address, affected server and failed-login count.", "plainLanguage": "What happened, where and how often?", "stage": "Investigation" },
+      { "id": "N-03", "label": "3. Check source", "kind": "decision", "description": "Determine whether the source is external or is a protected internal asset.", "plainLanguage": "Is it safe to block this address?", "stage": "Decision" },
+      { "id": "N-04", "label": "4A. Propose IP block", "kind": "ai-proposal", "description": "AI proposes a simulated perimeter block for an external suspicious source.", "plainLanguage": "AI suggests blocking the outside address.", "stage": "Response" },
+      { "id": "N-05", "label": "4B. Escalate to SOC", "kind": "ai-proposal", "description": "AI proposes notifying a security analyst rather than blocking a protected internal source.", "plainLanguage": "Ask a human security analyst to review it.", "stage": "Response" },
+      { "id": "N-06", "label": "5. Referee checks", "kind": "referee", "description": "A deterministic policy checker approves or rejects the proposed action.", "plainLanguage": "Is the AI's suggestion allowed by the rules?", "stage": "Validation" },
+      { "id": "N-07", "label": "6A. Apply simulated response", "kind": "simulation", "description": "Record the approved response in the scenario state. No real firewall or server is changed.", "plainLanguage": "Practice the approved action safely.", "stage": "Resolution" },
+      { "id": "N-08", "label": "7. Save audit trail", "kind": "audit", "description": "Record the proposed decision, Referee verdict, state changes and timestamps.", "plainLanguage": "Write down what happened and why.", "stage": "Audit" },
+      { "id": "N-09", "label": "8. Show results", "kind": "result", "description": "Present the completed simulation, evaluated decisions and applicable rule adherence.", "plainLanguage": "Show the final report.", "stage": "Results", "terminal": true },
+      { "id": "N-10", "label": "6B. Review rejected action", "kind": "failure-handling", "description": "Do not apply a rejected action. Record the violation and route it for manual review.", "plainLanguage": "The AI suggestion broke a rule; stop that action.", "stage": "Resolution" }
+    ],
+    "edges": [
+      { "from": "N-01", "to": "N-02" },
+      { "from": "N-02", "to": "N-03" },
+      { "from": "N-03", "to": "N-04", "label": "external, not protected", "condition": "sourceIsInternal == false && sourceIsProtected == false" },
+      { "from": "N-03", "to": "N-05", "label": "internal or protected", "condition": "sourceIsInternal == true || sourceIsProtected == true" },
+      { "from": "N-04", "to": "N-06" },
+      { "from": "N-05", "to": "N-06" },
+      { "from": "N-06", "to": "N-07", "label": "APPROVED" },
+      { "from": "N-06", "to": "N-10", "label": "REJECTED" },
+      { "from": "N-07", "to": "N-08" },
+      { "from": "N-10", "to": "N-08" },
+      { "from": "N-08", "to": "N-09" }
+    ]
+  },
+  "illustrativeWalkthrough": {
+    "mode": "example-only-not-a-verified-run",
+    "selectedBranch": "external-source",
+    "expectedVisitedNodes": ["N-01", "N-02", "N-03", "N-04", "N-06", "N-07", "N-08", "N-09"],
+    "expectedSkippedNodes": ["N-05", "N-10"],
+    "exampleRefereeDecision": "APPROVED if the external-address block satisfies the installed demo policy",
+    "whatToWatch": "Follow the highlighted node from alert to investigation, then the branch at N-03, the independent check at N-06, and the final report at N-09."
+  },
+  "integrationNotes": {
+    "current4SightImport": "The current Scenario Explorer may show this file as preview-only. Import does not establish executable backend support.",
+    "toMakeExecutable": "Map this graph to a supported versioned scenario definition, narrative storylets, policy checks, event/node IDs, and backend run contract. Do not claim the JSON alone activates these capabilities.",
+    "safety": "No real security actions, credential attempts, or host modifications are requested."
+  }
+}

@@ -52,13 +52,11 @@ import { useBackendCatalog } from "./hooks/useBackendCatalog";
 import { backendResult, nodePresentation, scenarioSources } from "./data/backendPresentation";
 import type { RunInput } from "./api/types";
 import {
-  graph,
-  neighbors,
-  nodeById,
+  beginnerGraph, legacyGraph,
   statusFor,
   statusLabel,
-  steps,
 } from "./data/graph";
+import { BEGINNER_SCENARIO_ID } from "../backend/src/domain/narrative/scenarios/ssh-beginner";
 import { useMotion, useReducedMotion } from "./hooks/useMotion";
 import {
   HOLD_DURATION,
@@ -128,7 +126,7 @@ export default function App() {
   const [browserOpen, setBrowserOpen] = useState(false);
   const [query, setQuery] = useState("");
   const input: RunInput | null = supportedSource && selectedModel ? {
-    scenarioId: "ssh-brute-force", initialVariant: supportedSource.id.endsWith(":protectedInternalSource") ? "protectedInternalSource" : "externalSource",
+    scenarioId: supportedSource.id.split(":")[1] as RunInput["scenarioId"], initialVariant: supportedSource.id.endsWith(":protectedInternalSource") ? "protectedInternalSource" : "externalSource",
     providerId: selectedModel.providerId, modelId: selectedModel.modelId, additionalContext: workspace.additionalContext,
   } : null;
   const {
@@ -147,7 +145,10 @@ export default function App() {
     setResultsOpen,
     toggleResults,
     canRetry,
+    presentation,
   } = useSimulationRun(input, executionBlock);
+  const graph = (snapshot?.configuration.scenario.id ?? input?.scenarioId) === BEGINNER_SCENARIO_ID ? beginnerGraph : legacyGraph;
+  const { steps, neighbors, nodeById } = graph;
   const simulationStatus = snapshot?.status ?? "IDLE";
   const restoredSelection = useRef<string | null>(null);
   useEffect(() => {
@@ -159,7 +160,16 @@ export default function App() {
     setSelectedAgent(`${providerId}:${snapshot.configuration.modelId ?? ""}`);
   }, [snapshot, executableSources]);
   const evaluationResult = backendResult(snapshot, events);
-  const { statuses: nodeStatuses, activeNodeId } = nodePresentation(snapshot, events);
+  const { statuses: nodeStatuses, activeNodeId } = presentation ?? (graph === beginnerGraph
+    ? { statuses: Object.fromEntries(steps.map(step => [step.id, "ready" as const])), activeNodeId: null }
+    : nodePresentation(snapshot, events));
+  const presenting = !!presentation?.activeNodeId;
+  useEffect(() => {
+    if (presentation?.activeNodeId) {
+      setSelectedNodeId(presentation.activeNodeId);
+      if (window.innerWidth >= 1100) setRightOpen(true);
+    }
+  }, [presentation?.activeNodeId]);
   const demoIndex = activeNodeId ? steps.findIndex((step) => step.id === activeNodeId) : -1;
   const simulationDisabled = pending || !!runId && !snapshot || !!executionBlock && !completed && !running;
   const simulationAction = useCallback(() => {
@@ -286,7 +296,7 @@ export default function App() {
         setRightOpen(true);
       }
     },
-    [isImmersive, selectedNodeId, emitAudio],
+    [isImmersive, selectedNodeId, emitAudio, nodeById],
   );
   const dismissSelection = useCallback(() => {
     setSelectedNodeId(null);
@@ -300,7 +310,7 @@ export default function App() {
       selectNode(id, true);
       graphApi.current?.navigateToNode(id);
     },
-    [selectNode],
+    [selectNode, nodeById],
   );
   const onHover = useCallback(
     (id: string | null, point?: { x: number; y: number }) => {
@@ -346,7 +356,9 @@ export default function App() {
     };
   }, [browserOpen]);
   const hoverNode = hoveredNodeId ? nodeById.get(hoveredNodeId) : null;
-  const demoState = snapshot ? `${snapshot.status}${snapshot.evaluation ? ` · ${snapshot.evaluation.outcome}` : ""}` : pending ? "Creating run…" : "Ready to explore";
+  const activeStep = steps.find(step => step.id === activeNodeId);
+  const demoState = activeStep ? `${activeStep.name} · ${snapshot?.status === "COMPLETED" ? "Committed event replay" : snapshot?.status ?? "RUNNING"}`
+    : snapshot ? `${snapshot.status}${snapshot.evaluation ? ` · ${snapshot.evaluation.outcome}` : ""}` : pending ? "Creating run…" : "Ready to explore";
 
   return (
     <div
@@ -677,9 +689,9 @@ export default function App() {
                 </button>
               </div>
               <span className="graph-stats">
-                5 steps
+                {steps.length} steps
                 <span />
-                80 context nodes
+                {graph.nodes.length - steps.length} context nodes
               </span>
             </div>
           </div>
@@ -690,6 +702,7 @@ export default function App() {
               inert={view !== "graph"}
             >
               <GraphCanvas
+                dataset={graph}
                 ref={graphApi}
                 selectedNodeId={selectedNodeId}
                 hoveredNodeId={hoveredNodeId}
@@ -702,18 +715,19 @@ export default function App() {
                 isImmersive={isImmersive}
                 reducedMotion={reduced}
                 demoIndex={demoIndex}
-                running={running}
+                running={running || presenting}
                 runId={runId ?? ""}
-                executionIdentity={`${runId ?? ""}:${events.filter((event) => event.eventType === "step.started").at(-1)?.sequence ?? 0}`}
+                executionIdentity={`${runId ?? ""}:${presentation?.frameSequence ?? events.filter((event) => event.eventType === "step.started").at(-1)?.sequence ?? 0}`}
                 nodeStatuses={nodeStatuses}
                 activeNodeId={activeNodeId}
-                terminal={completed}
+                terminal={completed && !presenting}
                 showContext={showContext}
                 visible={view === "graph"}
               />
             </div>
             {view === "steps" && (
               <StepView
+                steps={steps}
                 selectedId={selectedNodeId}
                 demoIndex={demoIndex}
                 nodeStatuses={nodeStatuses}
@@ -729,7 +743,7 @@ export default function App() {
               <span className="spatial-subtitle">
                 {view === "graph"
                   ? "Connected context. Considered action."
-                  : "A directed, five-step demonstration."}
+                  : `A directed, ${steps.length}-node workflow.`}
               </span>
             </div>
             <div className="canvas-top-right">
@@ -940,6 +954,9 @@ export default function App() {
             {isImmersive && compactOpen && selectedNodeId && (
               <div className="immersive-detail">
                 <NodeDetails
+                    dataset={graph}
+                    run={snapshot}
+                    events={presentation?.visibleEvents ?? events}
                   id={selectedNodeId}
                   demoIndex={demoIndex}
                   nodeStatuses={nodeStatuses}
@@ -1001,6 +1018,9 @@ export default function App() {
             </div>
             <div className="inspector-scroll">
               <NodeDetails
+                  dataset={graph}
+                  run={snapshot}
+                  events={presentation?.visibleEvents ?? events}
                 id={selectedNodeId}
                 demoIndex={demoIndex}
                 nodeStatuses={nodeStatuses}

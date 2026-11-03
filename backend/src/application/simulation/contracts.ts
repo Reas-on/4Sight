@@ -1,4 +1,6 @@
-import type { NarrativeState, ScenarioDefinition } from '../../domain/narrative/types.js';
+import type { NarrativeState, ScenarioDefinition, TransitionRecord } from '../../domain/narrative/types.js';
+import type { ProposedDecision } from '../../domain/referee/types.js';
+import type { beginnerContext } from '../../domain/narrative/scenarios/ssh-beginner.js';
 import type { SimulationErrorInfo, SimulationEvaluation, SimulationRecord, SimulationStatus } from '../../domain/simulation/types.js';
 import type { SimulationLifecycleAction } from '../../domain/simulation/lifecycle.js';
 
@@ -9,6 +11,7 @@ export interface RunConfiguration {
   readonly providerId: string;
   readonly modelId: string | null;
   readonly decisionTimeoutMs: number;
+  readonly incidentContext?: typeof beginnerContext;
 }
 
 export interface DurableRun {
@@ -25,6 +28,7 @@ export interface DurableRun {
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly updatedAt: string;
+  readonly workflow?: { readonly proposal: ProposedDecision | null; readonly transitions: readonly TransitionRecord[] };
 }
 
 export interface AuditEvent {
@@ -46,6 +50,7 @@ export interface SimulationRepository {
   lifecycle(id: string, action: SimulationLifecycleAction): Promise<DurableRun>;
   startStep(id: string, revision: number): Promise<DurableRun>;
   commitDecision(id: string, revision: number, stateVersion: number, decision: unknown): Promise<DurableRun>;
+  commitWorkflow(id: string, revision: number, proposal?: unknown): Promise<DurableRun>;
   fail(id: string, revision: number, code: string): Promise<DurableRun>;
   events(id: string, after: number, limit?: number): Promise<readonly AuditEvent[]>;
   recover(): Promise<number>;

@@ -3,6 +3,7 @@ import { ApiError, isTerminal } from "../api/client";
 import { consumeRunEvents, type EventConsumer } from "../api/events";
 import { simulationApi, type SimulationApi } from "../api/simulation";
 import type { AuditEvent, DurableRun, RunInput } from "../api/types";
+import { useWorkflowPresentation } from "./useWorkflowPresentation";
 
 const STORAGE_KEY = "4sight.backend-run-id";
 const savedRun = () => { try { const id = sessionStorage.getItem(STORAGE_KEY); return id && /^[a-f0-9-]{36}$/i.test(id) ? id : null; } catch { return null; } };
@@ -27,6 +28,7 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
   const mounted = useRef(true);
   const busy = useRef(false);
   const streamAbort = useRef<AbortController | null>(null);
+  const presentation = useWorkflowPresentation(snapshot, events);
   const operationAbort = useRef<AbortController | null>(null);
 
   const accept = useCallback((run: DurableRun) => {
@@ -85,8 +87,8 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
   }, [runId, subscriptionEpoch, api, consume, accept]);
 
   useEffect(() => {
-    if (snapshot?.evaluation && isTerminal(snapshot.status)) setResultsOpen(true);
-  }, [snapshot?.id, snapshot?.evaluation?.completedAt]);
+    if (snapshot?.evaluation && isTerminal(snapshot.status) && (!presentation || presentation.ready)) setResultsOpen(true);
+  }, [snapshot?.id, snapshot?.evaluation?.completedAt, presentation?.ready]);
 
   const perform = useCallback(async (action: "run" | "retry" | "pause" | "cancel") => {
     if (busy.current) return;
@@ -144,7 +146,7 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
   }, [api, accept]);
 
   return {
-    runId, snapshot, events, error, pending, isResultsOpen, setResultsOpen,
+    runId, snapshot, events, error, pending, isResultsOpen, setResultsOpen, presentation,
     run: () => void perform("run"), retry: () => void perform("retry"),
     pause: () => void perform("pause"), stop: () => void perform("cancel"),
     toggleResults: () => { if (latest.current.snapshot?.evaluation) setResultsOpen((open) => !open); },

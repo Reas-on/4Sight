@@ -27,6 +27,7 @@ export interface WorldState {
   readonly responseStatus: ResponseStatus;
   readonly escalationAttempts: number;
   readonly completedEvents: readonly NarrativeEventId[];
+  readonly workflowStage?: number;
 }
 
 export interface NarrativeState {
@@ -41,7 +42,7 @@ export interface NarrativeState {
 }
 
 export type ScalarWorldField = Exclude<keyof WorldState, 'completedEvents'>;
-export type NumericWorldField = 'threatConfidence' | 'escalationAttempts';
+export type NumericWorldField = 'threatConfidence' | 'escalationAttempts' | 'workflowStage';
 export type ConditionValue = string | number | boolean;
 
 export type Condition =

@@ -159,3 +159,12 @@ export function createUnsafeProtectedBlockProvider(): ScriptedDecisionProvider {
     UNSAFE_PROTECTED_BLOCK_DECISIONS,
   );
 }
+
+export function createBeginnerFixtureProvider(unsafe = false): ScriptedDecisionProvider {
+  return createScriptedDecisionProvider('fixture-beginner', context => {
+    const internal = context.state.world.sourceClassification === 'internal' || context.state.world.sourceProtected || context.state.world.assetProtected;
+    return fixtureDecision('fixture-beginner', 'beginner-fixture-1', internal && !unsafe ? 'soc_escalation' : 'perimeter_block',
+      context.selectedStorylet.id, internal ? 'escalation-approved' : 'block-approved',
+      { sourceId: '203.0.113.25', incidentId: 'demo-ssh-001' });
+  });
+}

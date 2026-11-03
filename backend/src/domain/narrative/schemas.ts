@@ -35,6 +35,7 @@ export const WorldStateSchema = Type.Object(
     responseStatus: stringEnum(RESPONSE_STATUSES),
     escalationAttempts: Type.Integer({ minimum: 0, maximum: 10 }),
     completedEvents: Type.Array(EventIdSchema, { uniqueItems: true, maxItems: 100 }),
+    workflowStage: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
   },
   { additionalProperties: false },
 );

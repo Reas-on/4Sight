@@ -2,7 +2,8 @@ import fp from 'fastify-plugin';
 import type { Env } from '../config/env.js';
 import { loadAiConfig } from '../config/env.js';
 import { createConfiguredProvider } from '../ai/provider-registry.js';
-import { createExternalSourceProvider, createProtectedInternalProvider } from '../domain/simulation/fixtures.js';
+import { createBeginnerFixtureProvider, createExternalSourceProvider, createProtectedInternalProvider } from '../domain/simulation/fixtures.js';
+import { BEGINNER_SCENARIO_ID } from '../domain/narrative/scenarios/ssh-beginner.js';
 import { SimulationService, type ProviderFactory } from '../application/simulation/simulation-service.js';
 import { RecoveryService } from '../application/simulation/recovery-service.js';
 import { TransactionManager } from '../infrastructure/persistence/transaction-manager.js';
@@ -33,7 +34,8 @@ export const simulationPlugin = fp<SimulationPluginOptions>(async (app, { env, p
   const ai = loadAiConfig();
   const fixtureMode = env.SIMULATION_MODE === 'fixture';
   const factory = providerFactory ?? (fixtureMode
-    ? (variant) => variant === 'externalSource' ? createExternalSourceProvider() : createProtectedInternalProvider()
+    ? (variant, scenarioId) => scenarioId === BEGINNER_SCENARIO_ID ? createBeginnerFixtureProvider()
+      : variant === 'externalSource' ? createExternalSourceProvider() : createProtectedInternalProvider()
     : () => createConfiguredProvider(ai));
   service = new SimulationService(repository, factory, (code) => app.log.error({ code }, 'simulation worker failed'));
   await app.register(simulationRoutes, {

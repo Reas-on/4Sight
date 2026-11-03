@@ -32,6 +32,7 @@ interface MutableWorldState {
   responseStatus: ResponseStatus;
   escalationAttempts: number;
   completedEvents: NarrativeEventId[];
+  workflowStage?: number;
 }
 
 function toMutableWorldState(world: WorldState): MutableWorldState {
@@ -46,6 +47,7 @@ function toMutableWorldState(world: WorldState): MutableWorldState {
     responseStatus: world.responseStatus,
     escalationAttempts: world.escalationAttempts,
     completedEvents: [...world.completedEvents],
+    ...(world.workflowStage === undefined ? {} : { workflowStage: world.workflowStage }),
   };
 }
 
@@ -72,6 +74,9 @@ function assignSetField(
   }
 
   switch (field) {
+    case 'workflowStage':
+      draft.workflowStage = value as number;
+      return;
     case 'sourceClassification':
       draft.sourceClassification = value as SourceClassification;
       return;
@@ -121,6 +126,7 @@ function applyIncrement(
 
   const definition = getWorldFieldDefinition(field);
   const current = draft[field];
+  if (current === undefined) throw new NarrativeEffectError('MISSING_FIELD', `World state is missing field "${field}"`);
   const next = current + (by as number);
 
   if (next < (definition.min ?? Number.NEGATIVE_INFINITY)) {

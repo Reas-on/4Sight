@@ -1,3 +1,5 @@
+import { beginnerEdges, beginnerNodes } from "../../backend/src/domain/narrative/scenarios/ssh-beginner";
+
 export type StepStatus = "ready" | "active" | "complete" | "failed" | "rejected" | "skipped" | "not-evaluated";
 export type WorkflowStep = {
   id: string;
@@ -172,23 +174,24 @@ const centers: [number, number, number][] = [
 ];
 
 // Deterministic spring/repulsion relaxation, computed only once per module.
-function buildGraph() {
+function buildGraph(workflow = steps, positions = centers, connections?: GraphEdge[]) {
   const nodes: GraphEntity[] = [];
-  const edges: GraphEdge[] = steps.slice(1).map((step, i) => ({
-    source: steps[i].id,
+  const edges: GraphEdge[] = connections ? [...connections] : workflow.slice(1).map((step, i) => ({
+    source: workflow[i].id,
     target: step.id,
     kind: "workflow",
   }));
-  steps.forEach((step, group) => {
-    const center = centers[group];
+  workflow.forEach((step, group) => {
+    const center = positions[group];
     nodes.push({
       ...step,
       kind: "workflow",
       parentId: step.id,
       position: [...center],
     });
-    metadata[group].forEach((name, i) => {
-      const phi = Math.acos(1 - (2 * (i + 0.5)) / metadata[group].length);
+    const contextNames = metadata[group % metadata.length];
+    contextNames.forEach((name, i) => {
+      const phi = Math.acos(1 - (2 * (i + 0.5)) / contextNames.length);
       const theta = i * 2.399963 + group * 0.83;
       const r = 2.2 + Math.sin(i * 4.7 + group) * 0.65;
       const id = `M-${group + 1}-${String(i + 1).padStart(2, "0")}`;
@@ -233,7 +236,7 @@ function buildGraph() {
           force[j][axis] -= f;
         });
       });
-      const center = centers[Number(a.parentId.slice(-1)) - 1];
+      const center = positions[workflow.findIndex(step => step.id === a.parentId)];
       a.position.forEach((v, axis) => {
         force[i][axis] +=
           (center[axis] - v) * (a.kind === "workflow" ? 0.08 : 0.008);
@@ -288,6 +291,25 @@ export const neighbors = new Map(
     ),
   ]),
 );
+export type GraphDataset = {
+  nodes: GraphEntity[]; edges: GraphEdge[]; steps: WorkflowStep[];
+  nodeById: Map<string, GraphEntity>; neighbors: Map<string, Set<string>>;
+};
+export const legacyGraph: GraphDataset = { ...graph, steps, nodeById, neighbors };
+const beginnerSteps: WorkflowStep[] = beginnerNodes.map(([id, name, description, plainLanguage, category]) => ({
+  id, name, description: `${description} ${plainLanguage}`, category, technique: "T1110.001 · Password Guessing",
+  tool: category === "Response" ? "AI proposal" : category === "Validation" ? "Deterministic Referee" : "Narrative Engine",
+}));
+// Static topology and layout, calculated once; events only update state/colors/focus.
+const beginnerLayout = buildGraph(beginnerSteps, [
+  [-8, 2, 0], [-5, 4, -2], [-2, 2, 2], [1, 5, 0], [1, -2, -3],
+  [4, 2, 0], [6, 5, 2], [7, -2, 0], [4, -5, 2], [3, -2, 4],
+], beginnerEdges.map(([source, target]) => ({ source, target, kind: "workflow" })));
+export const beginnerGraph: GraphDataset = { ...beginnerLayout, steps: beginnerSteps,
+  nodeById: new Map(beginnerLayout.nodes.map(node => [node.id, node])),
+  neighbors: new Map(beginnerLayout.nodes.map(node => [node.id, new Set(beginnerLayout.edges.flatMap(edge =>
+    edge.source === node.id ? [edge.target] : edge.target === node.id ? [edge.source] : []))])),
+};
 export function statusFor(id: string, demoIndex: number): StepStatus {
   const node = nodeById.get(id);
   const index = steps.findIndex((step) => step.id === (node?.parentId ?? id));
@@ -303,4 +325,4 @@ export const statusLabel = (status: StepStatus) =>
     : status === "active"
       ? "Running"
       : status === "rejected" ? "Referee rejected" : status === "failed" ? "Execution failed"
-        : status === "skipped" ? "Skipped · contextual node" : status === "not-evaluated" ? "Not evaluated" : "Pending";
+         : status === "skipped" ? "Skipped" : status === "not-evaluated" ? "Not evaluated" : "Pending";

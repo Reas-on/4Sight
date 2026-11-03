@@ -12,6 +12,7 @@ export function cloneWorldState(world: WorldState): WorldState {
     responseStatus: world.responseStatus,
     escalationAttempts: world.escalationAttempts,
     completedEvents: [...world.completedEvents],
+    ...(world.workflowStage === undefined ? {} : { workflowStage: world.workflowStage }),
   };
 }
 

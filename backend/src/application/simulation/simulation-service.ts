@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { immutableDataSnapshot } from '../../domain/immutable.js';
 import { getEligibleStorylets, resolveNextStorylet } from '../../domain/narrative/engine.js';
 import { sshBruteForceScenario } from '../../domain/narrative/scenarios/ssh-brute-force.js';
+import { beginnerContext, beginnerScenario, BEGINNER_SCENARIO_VERSION, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
+import { advanceNarrative } from '../../domain/narrative/engine.js';
 import { requestDecision } from '../../domain/simulation/decision-provider.js';
 import { SimulationError } from '../../domain/simulation/errors.js';
 import { RefereeError, RefereeValidationError } from '../../domain/referee/errors.js';
@@ -10,7 +12,7 @@ import type { DecisionProvider } from '../../domain/simulation/types.js';
 import { ApplicationError, type DurableRun, type SimulationRepository } from './contracts.js';
 
 export type InitialVariant = 'externalSource' | 'protectedInternalSource';
-export type ProviderFactory = (variant: InitialVariant) => DecisionProvider;
+export type ProviderFactory = (variant: InitialVariant, scenarioId?: string) => DecisionProvider;
 
 export class SimulationService {
   private readonly workers = new Map<string, { controller: AbortController; task: Promise<void> }>();
@@ -32,11 +34,12 @@ export class SimulationService {
 
   private async createRun(scenarioId: string, initialVariant: InitialVariant,
     selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
-    if (scenarioId !== sshBruteForceScenario.id) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
+    const scenario = [beginnerScenario, sshBruteForceScenario].find(item => item.id === scenarioId);
+    if (!scenario) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
     this.checkCapacity();
     this.reservations += 1;
     try {
-      const provider = this.providerFactory(initialVariant);
+      const provider = this.providerFactory(initialVariant, scenario.id);
       if (selection?.additionalContext?.trim()) throw new ApplicationError('UNSUPPORTED_ADDITIONAL_CONTEXT', 400);
       const selectedProvider = provider.id.startsWith('fixture-') ? 'fixture' : provider.id;
       if (selection && (selection.providerId !== selectedProvider || selection.modelId !== (provider.provenance?.model ?? null))) {
@@ -44,9 +47,10 @@ export class SimulationService {
       }
       const accessToken = randomBytes(32).toString('hex');
       const created = await this.repository.create({
-        scenario: immutableDataSnapshot(sshBruteForceScenario), scenarioVersion: '1.0.0', initialVariant,
+        scenario: immutableDataSnapshot(scenario), scenarioVersion: isBeginner(scenario) ? BEGINNER_SCENARIO_VERSION : '1.0.0', initialVariant,
         providerId: provider.id, modelId: provider.provenance?.model ?? null,
         decisionTimeoutMs: provider.decisionTimeoutMs ?? 1000,
+        ...(isBeginner(scenario) ? { incidentContext: immutableDataSnapshot(beginnerContext) } : {}),
       }, accessToken);
       const run = await this.repository.lifecycle(created.id, 'start');
       if (this.closing) {
@@ -87,7 +91,7 @@ export class SimulationService {
         const previous = await this.repository.read(id);
         try { assertLifecycleTransition(previous.status, 'resume'); }
         catch { throw new ApplicationError('INVALID_LIFECYCLE_TRANSITION', 409); }
-        provider = this.providerFactory(previous.configuration.initialVariant);
+        provider = this.providerFactory(previous.configuration.initialVariant, previous.configuration.scenario.id);
         if (provider.id !== previous.configuration.providerId ||
             (provider.provenance?.model ?? null) !== previous.configuration.modelId) {
           throw new ApplicationError('PROVIDER_CONFIGURATION_CHANGED', 409);
@@ -134,15 +138,27 @@ export class SimulationService {
         const sequence = run.records.length + 1;
         run = await this.repository.startStep(run.id, run.revision);
         if (signal.aborted) return;
+        const workflow = isBeginner(run.configuration.scenario);
+        if (workflow && !isProposal(resolution.storylet)) {
+          run = await this.repository.commitWorkflow(run.id, run.revision);
+          continue;
+        }
+        // Advance only an in-memory preview to bind the proposal to the response gate.
+        // Persisting it and applying any security effect remain separate transactions.
+        const preview = workflow ? advanceNarrative(run.narrative, run.configuration.scenario, { outcomeId: 'recorded' }) : null;
+        const decisionState = preview?.status === 'advanced' ? preview.state : run.narrative;
+        const decisionResolution = resolveNextStorylet(decisionState, run.configuration.scenario);
+        if (decisionResolution.status !== 'eligible') throw new ApplicationError('NARRATIVE_DEAD_END', 409);
         const raw = await requestDecision(provider, Object.freeze({
           runId: run.id, sequence, scenario: immutableDataSnapshot(run.configuration.scenario),
-          state: immutableDataSnapshot(run.narrative), selectedStorylet: immutableDataSnapshot(resolution.storylet),
-          eligibleStorylets: immutableDataSnapshot(getEligibleStorylets(run.narrative, run.configuration.scenario)),
-          eligibleStoryletIds: Object.freeze([...resolution.eligibleStoryletIds]),
+          state: immutableDataSnapshot(decisionState), selectedStorylet: immutableDataSnapshot(decisionResolution.storylet),
+          eligibleStorylets: immutableDataSnapshot(getEligibleStorylets(decisionState, run.configuration.scenario)),
+          eligibleStoryletIds: Object.freeze([...decisionResolution.eligibleStoryletIds]),
           records: immutableDataSnapshot(run.records), signal,
         }), { timeoutMs: run.configuration.decisionTimeoutMs, signal, sequence });
         if (signal.aborted) return;
-        run = await this.repository.commitDecision(run.id, run.revision, run.narrative.version, raw);
+        run = workflow ? await this.repository.commitWorkflow(run.id, run.revision, raw)
+          : await this.repository.commitDecision(run.id, run.revision, run.narrative.version, raw);
       }
     } catch (error) {
       if (signal.aborted || error instanceof ApplicationError && error.statusCode === 409) return;

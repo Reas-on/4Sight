@@ -1,6 +1,7 @@
 import type { AuditEvent, DurableRun, ScenarioOption } from "../api/types";
 import type { ImportedSource } from "./scenario";
 import { steps, type StepStatus } from "./graph";
+import { BEGINNER_SCENARIO_ID, beginnerNodes } from "../../backend/src/domain/narrative/scenarios/ssh-beginner";
 
 export const storyletNodes: Record<string, string> = {
   "triage-ssh-brute-force": "N-01", "block-external-source": "N-04",
@@ -8,13 +9,15 @@ export const storyletNodes: Record<string, string> = {
 };
 
 export function scenarioSources(scenarios: ScenarioOption[]): ImportedSource[] {
-  return scenarios.filter((scenario) => scenario.id === "ssh-brute-force").flatMap((scenario) => scenario.initialVariants
+  return scenarios.filter((scenario) => ["ssh-brute-force", BEGINNER_SCENARIO_ID].includes(scenario.id)).flatMap((scenario) => scenario.initialVariants
     .filter((variant) => ["externalSource", "protectedInternalSource"].includes(variant))
     .map((variant) => ({
       id: `backend:${scenario.id}:${variant}`, name: `${scenario.title} · ${variant === "externalSource" ? "External source" : "Protected internal"}`,
       sourceType: "builtin" as const, originalFormat: "Backend executable scenario", materialType: "reference_scenario" as const,
       description: `Backend scenario ${scenario.id}, version ${scenario.version}. Narrative and Referee execution is persisted; no real security commands run.`,
-      mitreTechniqueIds: ["T1110.001"], rawContent: `${scenario.title}\n${variant}\nN-01 triage → N-04 containment/escalation → N-05 review.\nN-02 and N-03 remain contextual and are not evaluated.`,
+      mitreTechniqueIds: ["T1110.001"], rawContent: scenario.id === BEGINNER_SCENARIO_ID
+         ? `${scenario.title}\nBackend executable · ${scenario.version}\n${variant}\n25 unsuccessful SSH sign-ins in 2 minutes. Documentation-only source 203.0.113.25.\n${beginnerNodes.map(node => `${node[0]} ${node[1]} — ${node[3]}`).join("\n")}\nN-03 → N-04 (external) or N-05 (protected/internal) → N-06 → N-07 (approved) or N-10 (rejected) → N-08 → N-09.\nAll actions are simulated.`
+         : `${scenario.title}\n${variant}\nN-01 triage → N-04 containment/escalation → N-05 review.\nN-02 and N-03 remain contextual and are not evaluated.`,
     })));
 }
 

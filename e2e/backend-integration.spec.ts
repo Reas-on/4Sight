@@ -6,6 +6,9 @@ test("real persisted API/SSE → graph → results → retry, refresh and cancel
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(page.getByLabel("AI Agent / Model", { exact: true })).toHaveValue("fixture:");
+  await page.getByRole("button", { name: "Open Scenario Explorer" }).click();
+  await page.getByRole("button", { name: /SSH Brute Force · External source/ }).click();
+  await page.getByRole("button", { name: "Use Scenario", exact: true }).click();
   await expect(page.getByRole("button", { name: "Run demonstration", exact: true })).toBeEnabled();
   await page.evaluate(() => { (window as unknown as { savedCanvas: Element | null }).savedCanvas = document.querySelector("canvas"); });
   const creation = page.waitForResponse((response) => response.url().endsWith("/api/v1/runs") && response.request().method() === "POST");

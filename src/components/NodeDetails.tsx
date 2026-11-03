@@ -8,13 +8,13 @@ import {
   X,
 } from "lucide-react";
 import {
-  neighbors,
-  nodeById,
+  legacyGraph,
   statusFor,
   statusLabel,
-  steps,
+  type GraphDataset,
   type StepStatus,
 } from "../data/graph";
+import type { AuditEvent, DurableRun } from "../api/types";
 
 export default function NodeDetails({
   id,
@@ -23,6 +23,9 @@ export default function NodeDetails({
   onClose,
   onSelect,
   nodeStatuses,
+  dataset = legacyGraph,
+  run,
+  events = [],
 }: {
   id: string | null;
   demoIndex: number;
@@ -30,7 +33,11 @@ export default function NodeDetails({
   onClose?: () => void;
   onSelect: (id: string) => void;
   nodeStatuses?: Record<string, StepStatus>;
+  dataset?: GraphDataset;
+  run?: DurableRun | null;
+  events?: readonly AuditEvent[];
 }) {
+  const { neighbors, nodeById, steps } = dataset;
   const node = id ? nodeById.get(id) : undefined;
   if (!node)
     return (
@@ -46,6 +53,11 @@ export default function NodeDetails({
     );
   const step = steps.find((step) => step.id === node.parentId)!;
   const status = nodeStatuses?.[node.id] ?? statusFor(node.id, demoIndex);
+  const explanation = events.find(event => event.eventType === "decision.proposed");
+  const proposal = explanation ? run?.workflow?.proposal : null;
+  const decision = events.some(event => event.eventType === "decision.evaluated") ? run?.records.at(-1) : null;
+  const decisionNode = ["N-04", "N-05", "N-06", "N-07", "N-10"].includes(node.id) && !["ready", "skipped", "not-evaluated"].includes(status);
+  const incident = run?.configuration.incidentContext;
   return (
     <div
       className={`node-detail ${compact ? "compact" : ""}`}
@@ -95,9 +107,38 @@ export default function NodeDetails({
         </div>
         <div>
           <dt>Source</dt>
-          <dd>Illustrative dataset</dd>
+          <dd>{run?.workflow ? "Backend executable scenario" : "Illustrative dataset"}</dd>
         </div>
       </dl>
+      {run?.workflow && node.kind === "workflow" && (
+        <>
+          <div className="detail-rule" />
+          <h4>EXECUTION EVIDENCE</h4>
+          <dl className="detail-properties" data-testid="node-execution-evidence">
+            <div><dt>Incident</dt><dd>{incident?.incident ?? "Incident context unavailable."}</dd></div>
+            {incident && <>
+              <div><dt>Source address</dt><dd>{incident.sourceId} · simulated</dd></div>
+              <div><dt>Target</dt><dd>{incident.targetAsset}</dd></div>
+              <div><dt>Evidence</dt><dd>{incident.failedLogins} failed logins / {incident.windowSeconds} seconds</dd></div>
+            </>}
+            <div><dt>Source</dt><dd>{run.narrative.world.sourceClassification} · {run.narrative.world.sourceProtected ? "protected" : "not protected"}</dd></div>
+            <div><dt>Confidence</dt><dd>{run.narrative.world.threatConfidence}% · {run.narrative.world.threatConfidence > 70 ? "above" : "below"} policy threshold</dd></div>
+            {decisionNode && <div><dt>Available actions</dt><dd>{(explanation?.payload.availableActions as string[] | undefined)?.join(", ") ?? "perimeter_block, soc_escalation"}</dd></div>}
+            {decisionNode && proposal && <>
+              <div><dt>AI proposal</dt><dd>{proposal.actionType}</dd></div>
+              <div><dt>Parameters</dt><dd>{Object.entries(proposal.parameters ?? {}).map(([key, value]) => `${key}: ${value}`).join(" · ") || "None provided"}</dd></div>
+              <div><dt>Model explanation</dt><dd>{proposal.reasoning ?? "No public explanation provided."} Supporting information only.</dd></div>
+            </>}
+            {decisionNode && decision && <>
+              <div><dt>Referee</dt><dd>{decision.referee.verdict}</dd></div>
+              {decision.referee.evaluatedPolicies.filter(policy => policy.status !== "NOT_APPLICABLE").map(policy => (
+                <div key={policy.policyId}><dt>{policy.policyId}</dt><dd>{policy.message}</dd></div>
+              ))}
+            </>}
+            {status === "skipped" && <div><dt>Branch</dt><dd>This branch was not selected. No action was executed here.</dd></div>}
+          </dl>
+        </>
+      )}
       {!compact && (
         <>
           <div className="detail-rule" />
@@ -106,7 +147,7 @@ export default function NodeDetails({
             <Braces size={16} />
             <div>
               <strong>{step.technique}</strong>
-              <span>Illustrative reference · not evaluated</span>
+              <span>{run?.workflow ? "Backend scenario · persisted evidence" : "Illustrative reference · not evaluated"}</span>
             </div>
             <ArrowUpRight size={13} />
           </div>

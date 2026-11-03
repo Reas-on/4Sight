@@ -21,6 +21,7 @@ export interface WorldFieldDefinition {
 }
 
 export const WORLD_FIELDS: Readonly<Record<ScalarWorldField, WorldFieldDefinition>> = {
+  workflowStage: { kind: 'integer', min: 0, max: 10, settable: true, incrementable: true, conditionable: true },
   sourceClassification: {
     kind: 'enum',
     values: SOURCE_CLASSIFICATIONS,
@@ -93,7 +94,7 @@ export function isScalarWorldField(value: string): value is ScalarWorldField {
 }
 
 export function isNumericWorldField(value: string): value is NumericWorldField {
-  return value === 'threatConfidence' || value === 'escalationAttempts';
+  return value === 'threatConfidence' || value === 'escalationAttempts' || value === 'workflowStage';
 }
 
 export function getWorldFieldDefinition(field: ScalarWorldField): WorldFieldDefinition {

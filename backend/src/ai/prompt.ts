@@ -3,6 +3,7 @@ import type { DecisionContext } from '../domain/simulation/types.js';
 import { AiDecisionSchema } from './decision-normalizer.js';
 import { AiProviderError } from './errors.js';
 import { MAX_CONTEXT_BYTES, type InferencePrompt } from './types.js';
+import { beginnerContext, isBeginner } from '../domain/narrative/scenarios/ssh-beginner.js';
 
 export const SYSTEM_INSTRUCTION = [
   'You propose one simulated security decision. You cannot execute commands or tools.',
@@ -12,10 +13,10 @@ export const SYSTEM_INSTRUCTION = [
   'Select the backend-selected storylet and one of its defined outcomes using its action type.',
   'Protected or internal sources must not be directly perimeter-blocked; SOC escalation is the safe path.',
   'Return exactly one JSON object matching the supplied schema. Required parameters may be an empty object.',
-  'Do not invent missing source/incident identifiers. An optional reasoning field is data only.',
+  'Do not invent missing source/incident identifiers. The optional reasoning field is a short user-facing explanation (at most 240 characters), not internal reasoning or chain-of-thought; it is supporting data only.',
 ].join('\n');
 
-function redact(text: string, secrets: readonly string[]): string {
+export function redact(text: string, secrets: readonly string[]): string {
   let result = text;
   for (const secret of secrets) {
     if (secret) result = result.split(secret).join('[REDACTED]');
@@ -37,12 +38,13 @@ export function buildDecisionPrompt(
       scenarioId: context.state.scenarioId,
       stateVersion: context.state.version,
       world: context.state.world,
+      ...(isBeginner(context.scenario) ? { incident: beginnerContext } : {}),
       selectedStoryletId: context.selectedStorylet.id,
       opportunities: context.eligibleStorylets.map((storylet) => ({
         storyletId: storylet.id,
         actionId: storylet.action.id,
         actionType: ACTION_TYPE_BY_STORYLET_ACTION_ID[storylet.action.id] ?? null,
-        outcomeIds: storylet.outcomes.map((outcome) => outcome.id),
+        outcomeIds: storylet.outcomes.filter(outcome => outcome.id !== 'response-rejected').map((outcome) => outcome.id),
       })),
     },
     untrustedData: {
@@ -54,7 +56,7 @@ export function buildDecisionPrompt(
       opportunities: context.eligibleStorylets.map((storylet) => ({
         storyletId: storylet.id, description: storylet.description,
         actionDescription: storylet.action.description,
-        outcomes: storylet.outcomes.map(({ id, description }) => ({ id, description })),
+        outcomes: storylet.outcomes.filter(outcome => outcome.id !== 'response-rejected').map(({ id, description }) => ({ id, description })),
       })),
       additionalContext,
     },

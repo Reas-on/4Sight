@@ -1,7 +1,8 @@
-import type { NarrativeState } from '../narrative/types.js';
+import type { NarrativeState, TransitionRecord } from '../narrative/types.js';
 import type { RefereePolicySet } from '../referee/types.js';
 import type { DecisionProvider, SimulationRecord, SimulationStatus } from './types.js';
 import { SimulationError } from './errors.js';
+import { BEGINNER_SCENARIO_ID } from '../narrative/scenarios/ssh-beginner.js';
 import type {
   PolicyViolation,
   SimulationEvaluation,
@@ -17,6 +18,7 @@ export interface EvaluationContext {
   readonly narrative: NarrativeState;
   readonly startedAt: string | null;
   readonly policySet: Pick<RefereePolicySet, 'id' | 'version'>;
+  readonly workflowTransitions?: readonly TransitionRecord[];
 }
 
 export function buildSimulationEvaluation(
@@ -30,6 +32,16 @@ export function buildSimulationEvaluation(
   let approvedDecisions = 0;
   let rejectedDecisions = 0;
   let stateVersion = 0;
+  if (runtime.workflowTransitions) {
+    if (runtime.scenario.id !== BEGINNER_SCENARIO_ID || runtime.records.length > 1) {
+      throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Unexpected workflow evidence');
+    }
+    runtime.workflowTransitions.forEach((transition, index) => {
+      if (transition.sequence !== index + 1 || transition.previousStateVersion !== index || transition.nextStateVersion !== index + 1) {
+        throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Workflow transition versions are inconsistent');
+      }
+    });
+  }
 
   runtime.records.forEach((record, index) => {
     if (record.referee.decisionId !== record.decision.decisionId ||
@@ -39,12 +51,24 @@ export function buildSimulationEvaluation(
         !record.referee.approved && record.referee.violatedPolicies.length === 0) {
       throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Referee and decision evidence are inconsistent');
     }
+    if (runtime.workflowTransitions) {
+      const gate = runtime.workflowTransitions.find(transition => transition.graphNodeId === 'N-06');
+      if (!gate || gate.storyletId !== record.decision.storyletId || record.referee.stateVersion !== gate.previousStateVersion ||
+          gate.outcomeId !== (record.referee.approved ? record.decision.outcomeId : 'response-rejected')) {
+        throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Referee decision does not match the committed response gate');
+      }
+      stateVersion = gate.previousStateVersion;
+    }
     if (record.sequence !== index + 1 || record.referee.stateVersion !== stateVersion ||
         record.transition && (record.transition.previousStateVersion !== stateVersion ||
           record.transition.nextStateVersion !== stateVersion + 1 || record.transition.sequence !== stateVersion + 1)) {
       throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision and transition versions are inconsistent');
     }
     if (record.transition) stateVersion++;
+    if (runtime.workflowTransitions && record.transition && !runtime.workflowTransitions.some(item =>
+      item.storyletId === record.transition!.storyletId && item.nextStateVersion === record.transition!.nextStateVersion && item.outcomeId === record.transition!.outcomeId)) {
+      throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision transition is missing from workflow evidence');
+    }
     if (record.referee.approved !== (record.referee.verdict === 'APPROVED') ||
         !record.referee.approved && record.transition !== null) {
       throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision evidence is inconsistent');
@@ -68,6 +92,7 @@ export function buildSimulationEvaluation(
     });
   });
 
+  if (runtime.workflowTransitions) stateVersion = runtime.workflowTransitions.length;
   if (stateVersion !== runtime.narrative.version || stateVersion !== runtime.narrative.step) {
     throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Final narrative version differs from committed evidence');
   }

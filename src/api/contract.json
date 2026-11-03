@@ -433,6 +433,38 @@
           },
           "decisionTimeoutMs": {
             "type": "integer"
+          },
+          "incidentContext": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "incident",
+              "sourceId",
+              "incidentId",
+              "targetAsset",
+              "failedLogins",
+              "windowSeconds"
+            ],
+            "properties": {
+              "incident": {
+                "type": "string"
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "incidentId": {
+                "type": "string"
+              },
+              "targetAsset": {
+                "type": "string"
+              },
+              "failedLogins": {
+                "type": "integer"
+              },
+              "windowSeconds": {
+                "type": "integer"
+              }
+            }
           }
         }
       },
@@ -633,6 +665,11 @@
                   "maxLength": 200,
                   "type": "string"
                 }
+              },
+              "workflowStage": {
+                "minimum": 0,
+                "maximum": 10,
+                "type": "integer"
               }
             }
           },
@@ -781,6 +818,11 @@
                   "maxLength": 200,
                   "type": "string"
                 }
+              },
+              "workflowStage": {
+                "minimum": 0,
+                "maximum": 10,
+                "type": "integer"
               }
             }
           },
@@ -1468,6 +1510,11 @@
                       "maxLength": 200,
                       "type": "string"
                     }
+                  },
+                  "workflowStage": {
+                    "minimum": 0,
+                    "maximum": 10,
+                    "type": "integer"
                   }
                 }
               },
@@ -1551,6 +1598,230 @@
       },
       "updatedAt": {
         "type": "string"
+      },
+      "workflow": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "proposal",
+          "transitions"
+        ],
+        "properties": {
+          "proposal": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "decisionId",
+                  "providerId",
+                  "actionType",
+                  "storyletId",
+                  "outcomeId"
+                ],
+                "properties": {
+                  "decisionId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "actionType": {
+                    "anyOf": [
+                      {
+                        "const": "triage_alert",
+                        "type": "string"
+                      },
+                      {
+                        "const": "perimeter_block",
+                        "type": "string"
+                      },
+                      {
+                        "const": "soc_escalation",
+                        "type": "string"
+                      },
+                      {
+                        "const": "soc_acknowledgement",
+                        "type": "string"
+                      },
+                      {
+                        "const": "incident_closure",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "parameters": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      "incidentId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "storyletId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "outcomeId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "reasoning": {
+                    "maxLength": 4000,
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "sequence",
+                "storyletId",
+                "outcomeId",
+                "previousStateVersion",
+                "nextStateVersion",
+                "appliedEffects"
+              ],
+              "properties": {
+                "sequence": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "storyletId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "outcomeId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "previousStateVersion": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "nextStateVersion": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "appliedEffects": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "value"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "set",
+                            "type": "string"
+                          },
+                          "field": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "by"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "increment",
+                            "type": "string"
+                          },
+                          "field": {
+                            "type": "string"
+                          },
+                          "by": {
+                            "minimum": -100,
+                            "maximum": 100,
+                            "type": "integer"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "value"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "append",
+                            "type": "string"
+                          },
+                          "field": {
+                            "const": "completedEvents",
+                            "type": "string"
+                          },
+                          "value": {
+                            "pattern": "^event:[a-z0-9-]+$",
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "graphNodeId": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -1808,6 +2079,135 @@
                 "type": "string"
               }
             }
+          },
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "proposal",
+              "context",
+              "availableActions"
+            ],
+            "properties": {
+              "proposal": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "decisionId",
+                  "providerId",
+                  "actionType",
+                  "storyletId",
+                  "outcomeId"
+                ],
+                "properties": {
+                  "decisionId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  "providerId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  "actionType": {
+                    "anyOf": [
+                      {
+                        "const": "triage_alert",
+                        "type": "string"
+                      },
+                      {
+                        "const": "perimeter_block",
+                        "type": "string"
+                      },
+                      {
+                        "const": "soc_escalation",
+                        "type": "string"
+                      },
+                      {
+                        "const": "soc_acknowledgement",
+                        "type": "string"
+                      },
+                      {
+                        "const": "incident_closure",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "parameters": {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "properties": {
+                      "sourceId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      "incidentId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "storyletId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "outcomeId": {
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "reasoning": {
+                    "maxLength": 4000,
+                    "type": "string"
+                  }
+                }
+              },
+              "context": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "incident",
+                  "targetAsset",
+                  "sourceClassification",
+                  "sourceProtected",
+                  "assetProtected",
+                  "threatConfidence"
+                ],
+                "properties": {
+                  "incident": {
+                    "type": "string"
+                  },
+                  "targetAsset": {
+                    "type": "string"
+                  },
+                  "sourceClassification": {
+                    "type": "string"
+                  },
+                  "sourceProtected": {
+                    "type": "boolean"
+                  },
+                  "assetProtected": {
+                    "type": "boolean"
+                  },
+                  "threatConfidence": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "availableActions": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
           }
         ]
       },
@@ -1825,8 +2225,16 @@
     ],
     "properties": {
       "scenarioId": {
-        "const": "ssh-brute-force",
-        "type": "string"
+        "anyOf": [
+          {
+            "const": "ssh-brute-force",
+            "type": "string"
+          },
+          {
+            "const": "ssh-login-investigation-beginner",
+            "type": "string"
+          }
+        ]
       },
       "initialVariant": {
         "anyOf": [
@@ -2297,6 +2705,38 @@
               },
               "decisionTimeoutMs": {
                 "type": "integer"
+              },
+              "incidentContext": {
+                "additionalProperties": false,
+                "type": "object",
+                "required": [
+                  "incident",
+                  "sourceId",
+                  "incidentId",
+                  "targetAsset",
+                  "failedLogins",
+                  "windowSeconds"
+                ],
+                "properties": {
+                  "incident": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "incidentId": {
+                    "type": "string"
+                  },
+                  "targetAsset": {
+                    "type": "string"
+                  },
+                  "failedLogins": {
+                    "type": "integer"
+                  },
+                  "windowSeconds": {
+                    "type": "integer"
+                  }
+                }
               }
             }
           },
@@ -2497,6 +2937,11 @@
                       "maxLength": 200,
                       "type": "string"
                     }
+                  },
+                  "workflowStage": {
+                    "minimum": 0,
+                    "maximum": 10,
+                    "type": "integer"
                   }
                 }
               },
@@ -2645,6 +3090,11 @@
                       "maxLength": 200,
                       "type": "string"
                     }
+                  },
+                  "workflowStage": {
+                    "minimum": 0,
+                    "maximum": 10,
+                    "type": "integer"
                   }
                 }
               },
@@ -3332,6 +3782,11 @@
                           "maxLength": 200,
                           "type": "string"
                         }
+                      },
+                      "workflowStage": {
+                        "minimum": 0,
+                        "maximum": 10,
+                        "type": "integer"
                       }
                     }
                   },
@@ -3415,6 +3870,230 @@
           },
           "updatedAt": {
             "type": "string"
+          },
+          "workflow": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "proposal",
+              "transitions"
+            ],
+            "properties": {
+              "proposal": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "decisionId",
+                      "providerId",
+                      "actionType",
+                      "storyletId",
+                      "outcomeId"
+                    ],
+                    "properties": {
+                      "decisionId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                        "type": "string"
+                      },
+                      "providerId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      "actionType": {
+                        "anyOf": [
+                          {
+                            "const": "triage_alert",
+                            "type": "string"
+                          },
+                          {
+                            "const": "perimeter_block",
+                            "type": "string"
+                          },
+                          {
+                            "const": "soc_escalation",
+                            "type": "string"
+                          },
+                          {
+                            "const": "soc_acknowledgement",
+                            "type": "string"
+                          },
+                          {
+                            "const": "incident_closure",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "parameters": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "properties": {
+                          "sourceId": {
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "type": "string"
+                          },
+                          "incidentId": {
+                            "minLength": 1,
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "storyletId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "outcomeId": {
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "reasoning": {
+                        "maxLength": 4000,
+                        "type": "string"
+                      }
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "transitions": {
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "sequence",
+                    "storyletId",
+                    "outcomeId",
+                    "previousStateVersion",
+                    "nextStateVersion",
+                    "appliedEffects"
+                  ],
+                  "properties": {
+                    "sequence": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "storyletId": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "outcomeId": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "previousStateVersion": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "nextStateVersion": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "appliedEffects": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "value"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "set",
+                                "type": "string"
+                              },
+                              "field": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "by"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "increment",
+                                "type": "string"
+                              },
+                              "field": {
+                                "type": "string"
+                              },
+                              "by": {
+                                "minimum": -100,
+                                "maximum": 100,
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "value"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "append",
+                                "type": "string"
+                              },
+                              "field": {
+                                "const": "completedEvents",
+                                "type": "string"
+                              },
+                              "value": {
+                                "pattern": "^event:[a-z0-9-]+$",
+                                "maxLength": 200,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "graphNodeId": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -3693,6 +4372,11 @@
                   "maxLength": 200,
                   "type": "string"
                 }
+              },
+              "workflowStage": {
+                "minimum": 0,
+                "maximum": 10,
+                "type": "integer"
               }
             }
           },

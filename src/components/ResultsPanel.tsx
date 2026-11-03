@@ -166,7 +166,7 @@ export default function ResultsPanel({
               <div>
                 <span>Total Steps</span>
                 <strong data-testid="results-step-count">
-                  {run.records.filter((record) => record.transition).length}
+                  {run.workflow ? new Set(run.workflow.transitions.map(transition => transition.graphNodeId)).size : run.records.filter((record) => record.transition).length}
                 </strong>
                 <small>Committed narrative steps</small>
               </div>

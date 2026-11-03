@@ -1,23 +1,25 @@
 import { ArrowDown, ArrowUpRight, Check, CircleDot } from "lucide-react";
-import { statusFor, statusLabel, steps, type StepStatus } from "../data/graph";
+import { statusFor, statusLabel, steps as legacySteps, type WorkflowStep, type StepStatus } from "../data/graph";
 
 export default function StepView({
   selectedId,
   demoIndex,
   onSelect,
   nodeStatuses,
+  steps = legacySteps,
 }: {
   selectedId: string | null;
   demoIndex: number;
   onSelect: (id: string) => void;
   nodeStatuses?: Record<string, StepStatus>;
+  steps?: WorkflowStep[];
 }) {
   return (
     <section className="step-view" aria-label="Step-by-step demo workflow">
       <div className="step-heading">
         <span className="eyebrow">THE PLAYBOOK</span>
         <h2>One signal. A considered response.</h2>
-        <p>Five connected steps, from the first alert to analyst review.</p>
+        <p>{steps.length} workflow nodes, from the first alert to the final report.</p>
       </div>
       <div className="step-chain">
         {steps.map((step, i) => {
@@ -31,7 +33,7 @@ export default function StepView({
                 onClick={() => onSelect(step.id)}
               >
                 <span className="step-number">
-                  {status === "complete" ? <Check size={17} /> : `0${i + 1}`}
+                  {status === "complete" ? <Check size={17} /> : String(i + 1).padStart(2, "0")}
                 </span>
                 <div>
                   <span className="step-category">

@@ -24,6 +24,51 @@ and scoped to `/api/v1/runs/<run UUID>`; HTTP localhost does not use Secure cook
 
 Focused backend/browser acceptance: after local database migrations, run `npm run test:phase5`. It starts a test-only delayed fixture backend and Vite, exercising actual PostgreSQL and SSE. On NixOS, supply a compatible browser via `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` and its runtime library environment. Historical browser specs describe the old offline demonstration; the Phase 5 suite targets the current authoritative path.
 
+## Beginner SSH walkthrough
+
+Select **Suspicious SSH Logins — Beginner Walkthrough** in Scenario Explorer. This
+trusted built-in (`ssh-login-investigation-beginner`, version `1.0.0`) maps the
+supplied visual proposal to validated Narrative Engine storylets. The original
+proposal is preserved in `backend/src/domain/narrative/scenarios/ssh-beginner.reference.json`;
+it is reference data, not an executable import format. Its node IDs, labels and
+edges are retained, including `N-09` results and `N-10` rejection review.
+
+- `N-01 → N-02 → N-03`: receive 25 failed SSH logins in 120 seconds, collect the
+  simulated incident facts, and classify the source. Confidence `0.93` maps to
+  the engine's bounded integer `93` (policy threshold: greater than `70`).
+- External/unprotected: `N-04` asks the configured AI for a structured block
+  proposal. Internal/protected: `N-05` asks for SOC escalation. These are the only
+  inference stages; deterministic bookkeeping never calls the model.
+- `N-06` evaluates the proposal with the installed deterministic Referee. No
+  security effect is applied here. `N-07` records an approved simulated response;
+  a rejection instead executes `N-10` manual-review handling with no response
+  effect. Both routes reach `N-08 → N-09`. A rejection finishes **FAIL**, even
+  though the walkthrough reaches its terminal node. Approved escalation means
+  referred for SOC review, not a claim that an analyst resolved the incident.
+- Ordered committed SSE events are paced for presentation through the existing
+  camera controller. The backend never waits for animation. Fast intermediate
+  steps stay visible; unselected branches are marked Skipped. The Inspector
+  follows the active node and retains proposal, bounded public model explanation
+  (supporting information only), verdict and actual policy messages for later
+  inspection. Results show eight executed nodes and one Referee decision.
+
+Generic imports and arbitrary Additional Context remain preview-only/unsupported
+for execution. Capabilities and same-origin proxy security apply to both built-ins.
+
+Focused verification (no paid inference):
+
+```sh
+npm --prefix backend run api:contract
+PHASE4_DATABASE_TESTS=true npm --prefix backend test -- src/application/simulation/tests/beginner.test.ts
+npm test -- src/hooks/useWorkflowPresentation.test.tsx
+npx playwright test --config playwright.beginner.config.ts
+```
+
+Database tests use newly created isolated PostgreSQL databases and drop only those
+databases afterward. The browser harness uses ports `3101`/`4173` and mocked Gemini
+transport; the live `3001`/`5173` services stay available. NixOS browser runtime
+requirements are the same as the Phase 5 acceptance tests.
+
 ## Controls
 
 - Drag or two-finger scroll to orbit (horizontal = yaw, vertical = pitch; diagonal = both). A mouse wheel also rotates. Both axes support repeated complete revolutions through the poles, using a normalized camera-frame quaternion. Use the +/− buttons, Ctrl+scroll, or touch pinch to zoom; right-drag/two-finger touch drag to pan. Focus/click the graph, then hold arrow keys for horizontal/vertical orbit.

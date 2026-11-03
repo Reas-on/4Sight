@@ -7,6 +7,7 @@ import { ApplicationError } from '../application/simulation/contracts.js';
 import type { SimulationService } from '../application/simulation/simulation-service.js';
 import { EventStream } from '../infrastructure/streaming/event-stream.js';
 import { sshBruteForceScenario } from '../domain/narrative/scenarios/ssh-brute-force.js';
+import { beginnerScenario, BEGINNER_SCENARIO_VERSION } from '../domain/narrative/scenarios/ssh-beginner.js';
 import { AiProviderError } from '../ai/errors.js';
 import { RequestBudget } from './request-budget.js';
 import { CreateRunSchema, CreateRunValidationSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, ModelListSchema, RunSchema, ScenarioListSchema } from './simulation-schemas.js';
@@ -84,7 +85,8 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
 
   app.get('/api/v1/scenarios', {
     schema: { querystring: EmptyQuery, response: { 200: ScenarioListSchema, ...ErrorResponses } },
-  }, async () => ({ scenarios: [{ id: sshBruteForceScenario.id, version: '1.0.0', title: sshBruteForceScenario.title,
+  }, async () => ({ scenarios: [{ id: beginnerScenario.id, version: BEGINNER_SCENARIO_VERSION, title: beginnerScenario.title,
+    initialVariants: ['externalSource', 'protectedInternalSource'] }, { id: sshBruteForceScenario.id, version: '1.0.0', title: sshBruteForceScenario.title,
     initialVariants: ['externalSource', 'protectedInternalSource'] }] }));
 
   app.get('/api/v1/models', {

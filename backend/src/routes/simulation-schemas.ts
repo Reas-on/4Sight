@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { NarrativeStateSchema, ScenarioDefinitionSchema, TransitionRecordSchema } from '../domain/narrative/schemas.js';
 import { ProposedDecisionSchema } from '../domain/referee/schemas.js';
 import { SIMULATION_STATUSES } from '../domain/simulation/types.js';
+import { BEGINNER_SCENARIO_ID } from '../domain/narrative/scenarios/ssh-beginner.js';
 
 export const ErrorSchema = Type.Object({ error: Type.Object({ code: Type.String(), message: Type.String() }) });
 const nullableString = Type.Union([Type.String(), Type.Null()]);
@@ -37,6 +38,8 @@ export const RunSchema = Type.Object({
   configuration: Type.Object({
     scenario: ScenarioDefinitionSchema, scenarioVersion: Type.String(), initialVariant: Type.String(),
     providerId: Type.String(), modelId: nullableString, decisionTimeoutMs: Type.Integer(),
+    incidentContext: Type.Optional(Type.Object({ incident: Type.String(), sourceId: Type.String(), incidentId: Type.String(),
+      targetAsset: Type.String(), failedLogins: Type.Integer(), windowSeconds: Type.Integer() }, { additionalProperties: false })),
   }),
   status: Type.Union(SIMULATION_STATUSES.map((status) => Type.Literal(status))),
   revision: Type.Integer(), eventSequence: Type.Integer(), narrative: NarrativeStateSchema,
@@ -45,6 +48,7 @@ export const RunSchema = Type.Object({
   evaluation: Type.Union([EvaluationSchema, Type.Null()]),
   error: Type.Union([Type.Object({ code: Type.String(), message: Type.String(), phase: Type.String(), sequence: Type.Optional(Type.Integer()) }), Type.Null()]),
   createdAt: Type.String(), startedAt: nullableString, completedAt: nullableString, updatedAt: Type.String(),
+  workflow: Type.Optional(Type.Object({ proposal: Type.Union([ProposedDecisionSchema, Type.Null()]), transitions: Type.Array(TransitionRecordSchema) }, { additionalProperties: false })),
 });
 
 export const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) }, { additionalProperties: false });
@@ -58,7 +62,7 @@ export const ModelListSchema = Type.Object({ models: Type.Array(Type.Object({
 export type ScenarioOption = Static<typeof ScenarioListSchema>['scenarios'][number];
 export type ModelOption = Static<typeof ModelListSchema>['models'][number];
 export const CreateRunSchema = Type.Object({
-  scenarioId: Type.Literal('ssh-brute-force'),
+  scenarioId: Type.Union([Type.Literal('ssh-brute-force'), Type.Literal(BEGINNER_SCENARIO_ID)]),
   initialVariant: Type.Union([Type.Literal('externalSource'), Type.Literal('protectedInternalSource')]),
   providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   modelId: Type.Optional(Type.Unsafe<string | null>({ type: ['string', 'null'] })),
@@ -81,6 +85,9 @@ export const AuditEventSchema = Type.Object({
     Type.Object({ decisionSequence: Type.Integer() }, { additionalProperties: false }),
     Type.Object({ transition: TransitionRecordSchema }, { additionalProperties: false }),
     Type.Object({ status: Type.String(), outcome: Type.String(), reasonCode: Type.String() }, { additionalProperties: false }),
+    Type.Object({ proposal: ProposedDecisionSchema, context: Type.Object({ incident: Type.String(), targetAsset: Type.String(),
+      sourceClassification: Type.String(), sourceProtected: Type.Boolean(), assetProtected: Type.Boolean(), threatConfidence: Type.Integer() }, { additionalProperties: false }),
+      availableActions: Type.Array(Type.String()) }, { additionalProperties: false }),
   ]),
   createdAt: Type.String(),
 });
