@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { and, asc, eq, gt } from 'drizzle-orm';
 import * as tables from '../../db/schema.js';
-import { initializeScenario } from '../../domain/narrative/engine.js';
+import { initializeScenario, resolveNextStorylet } from '../../domain/narrative/engine.js';
 import { sshBruteForceInitialStates } from '../../domain/narrative/scenarios/ssh-brute-force.js';
 import { validateNarrativeState } from '../../domain/narrative/schemas.js';
 import { DEFAULT_REFEREE_POLICY_SET } from '../../domain/referee/policies.js';
@@ -165,6 +165,20 @@ export class PostgresSimulationRepository implements SimulationRepository {
         row.failure = { code: result.error.code, message: 'Narrative transition failed.', phase: 'narrative' };
         await this.finish(tx, row, 'FAILED', 'INCONCLUSIVE', 'NARRATIVE_ERROR');
       } else if (result.state.terminal) await this.finish(tx, row, 'COMPLETED', 'PASS', 'RUN_COMPLETED');
+      await this.saveRow(tx, row);
+      return this.hydrate(tx, await this.row(tx, id));
+    });
+  }
+
+  startStep(id: string, revision: number): Promise<DurableRun> {
+    return this.transactions.transaction(async (tx) => {
+      const row = await this.row(tx, id, true);
+      if (row.status !== 'RUNNING' || row.revision !== revision) throw new ApplicationError('STALE_RUN_REVISION', 409);
+      const run = await this.hydrate(tx, row);
+      const next = resolveNextStorylet(run.narrative, row.configuration.scenario);
+      if (next.status !== 'eligible') throw new ApplicationError('NARRATIVE_DEAD_END', 409);
+      await this.append(tx, row, 'step.started', { decisionSequence: run.records.length + 1 },
+        next.storylet.id, next.storylet.graphNodeId ?? null);
       await this.saveRow(tx, row);
       return this.hydrate(tx, await this.row(tx, id));
     });

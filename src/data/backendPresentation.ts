@@ -1,0 +1,51 @@
+import type { AuditEvent, DurableRun, ScenarioOption } from "../api/types";
+import type { ImportedSource } from "./scenario";
+import { steps, type StepStatus } from "./graph";
+
+export const storyletNodes: Record<string, string> = {
+  "triage-ssh-brute-force": "N-01", "block-external-source": "N-04",
+  "escalate-protected-source": "N-04", "soc-escalation-follow-up": "N-04", "close-ssh-incident": "N-05",
+};
+
+export function scenarioSources(scenarios: ScenarioOption[]): ImportedSource[] {
+  return scenarios.filter((scenario) => scenario.id === "ssh-brute-force").flatMap((scenario) => scenario.initialVariants
+    .filter((variant) => ["externalSource", "protectedInternalSource"].includes(variant))
+    .map((variant) => ({
+      id: `backend:${scenario.id}:${variant}`, name: `${scenario.title} · ${variant === "externalSource" ? "External source" : "Protected internal"}`,
+      sourceType: "builtin" as const, originalFormat: "Backend executable scenario", materialType: "reference_scenario" as const,
+      description: `Backend scenario ${scenario.id}, version ${scenario.version}. Narrative and Referee execution is persisted; no real security commands run.`,
+      mitreTechniqueIds: ["T1110.001"], rawContent: `${scenario.title}\n${variant}\nN-01 triage → N-04 containment/escalation → N-05 review.\nN-02 and N-03 remain contextual and are not evaluated.`,
+    })));
+}
+
+export function nodePresentation(run: DurableRun | null, events: readonly AuditEvent[]) {
+  const statuses: Record<string, StepStatus> = Object.fromEntries(steps.map((step) => [step.id,
+    step.id === "N-02" || step.id === "N-03" ? "skipped" : "ready"]));
+  for (const record of run?.records ?? []) {
+    const node = record.transition?.graphNodeId ?? storyletNodes[record.decision.storyletId];
+    if (!node) continue;
+    statuses[node] = !record.referee.approved ? "rejected" : record.transition ? "complete" : "failed";
+  }
+  const lastStart = [...events].reverse().find((event) => event.eventType === "step.started" && event.runId === run?.id);
+  const committed = run?.records.length ?? 0;
+  const inFlight = lastStart && Number(lastStart.payload.decisionSequence) > committed;
+  const node = lastStart?.nodeId ?? (lastStart?.storyletId ? storyletNodes[lastStart.storyletId] : null);
+  const activeNodeId = run?.status === "RUNNING" && inFlight ? node ?? null : null;
+  if (activeNodeId) statuses[activeNodeId] = "active";
+  if (run && ["COMPLETED", "FAILED", "CANCELLED"].includes(run.status)) {
+    for (const id of Object.keys(statuses)) if (statuses[id] === "ready") statuses[id] = "not-evaluated";
+    if (run.status === "FAILED" && inFlight && node) statuses[node] = "failed";
+  }
+  return { statuses, activeNodeId };
+}
+
+export type BackendResult = {
+  run: DurableRun;
+  events: readonly AuditEvent[];
+  ruleAdherence: number | null;
+};
+export function backendResult(run: DurableRun | null, events: readonly AuditEvent[]): BackendResult | null {
+  if (!run?.evaluation) return null;
+  return { run, events, ruleAdherence: run.evaluation.totalDecisions
+    ? 100 * run.evaluation.approvedDecisions / run.evaluation.totalDecisions : null };
+}

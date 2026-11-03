@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, Download, FlaskConical, ShieldCheck, X } from "lucide-react";
-import { formatAuditTime, type EvaluationResult } from "../data/demoLifecycle";
+import { formatAuditTime } from "../data/formatAuditTime";
+import { storyletNodes, type BackendResult } from "../data/backendPresentation";
 import { useReducedMotion } from "../hooks/useMotion";
 
 export default function ResultsPanel({
@@ -9,7 +10,7 @@ export default function ResultsPanel({
   onClose,
   onDismissFocus,
 }: {
-  result: EvaluationResult | null;
+  result: BackendResult | null;
   open: boolean;
   onClose: () => void;
   onDismissFocus: () => void;
@@ -99,6 +100,10 @@ export default function ResultsPanel({
   if (!displayResult || !present) return null;
   // Retain the completed snapshot during exit even when Retry clears its source.
   result = displayResult;
+  const { run, ruleAdherence } = result;
+  const evaluation = run.evaluation!;
+  const providerLabel = run.configuration.modelId
+    ? `${run.configuration.providerId} · ${run.configuration.modelId}` : `${run.configuration.providerId} · deterministic fixture`;
   return (
     <div className="results-overlay">
       <section
@@ -110,7 +115,7 @@ export default function ResultsPanel({
         aria-labelledby="results-title"
         aria-describedby="results-fixture-note"
         tabIndex={-1}
-        data-run-id={result.runId}
+        data-run-id={run.id}
         inert={!open}
         aria-hidden={!open}
       >
@@ -121,9 +126,9 @@ export default function ResultsPanel({
             <p>CISO Go/No-Go Evaluation</p>
           </div>
           <div className="results-header-actions">
-            <span className="results-pass-badge">
-              <Check size={13} />
-              PASS
+            <span className="results-pass-badge" style={evaluation.outcome === "PASS" ? undefined : { color: "var(--text-secondary)", background: "transparent" }}>
+              {evaluation.outcome === "PASS" ? <Check size={13} /> : <FlaskConical size={13} />}
+              {evaluation.outcome}
             </span>
             <button
               className="icon-button"
@@ -142,45 +147,43 @@ export default function ResultsPanel({
                 <span className="results-eyebrow">OVERALL RESULT</span>
                 <strong>
                   <ShieldCheck size={23} />
-                  {result.overall}
+                  {evaluation.outcome}
                 </strong>
               </div>
               <span className="results-demo-label">
                 <FlaskConical size={13} />
-                Simulated fixture
+                {run.status}
               </span>
             </div>
             <div className="results-metrics">
               <div>
                 <span>Hallucination Rate</span>
                 <strong>
-                  0.0<span>%</span>
+                  N/A
                 </strong>
-                <small>Simulated · not measured</small>
+                <small>No measurement available</small>
               </div>
               <div>
                 <span>Total Steps</span>
                 <strong data-testid="results-step-count">
-                  {result.totalSteps}
+                  {run.records.filter((record) => record.transition).length}
                 </strong>
-                <small>Executed workflow nodes</small>
+                <small>Committed narrative steps</small>
               </div>
               <div>
                 <span>Rule Adherence</span>
                 <strong>
-                  100<span>%</span>
+                  {ruleAdherence === null ? "N/A" : Number(ruleAdherence.toFixed(1))}{ruleAdherence !== null && <span>%</span>}
                 </strong>
-                <small>Simulated · not verified</small>
+                <small>Measured Referee decisions</small>
               </div>
             </div>
             <div className="results-run-meta">
               <span>
-                Run {result.runId} · {result.configuration.sourceName}
+                Run {run.id} · {run.configuration.scenario.title}
               </span>
               <span>
-                {result.configuration.agent === "demo-runner"
-                  ? "Local demo runner · simulated"
-                  : "No live model connected"}
+                {providerLabel}
               </span>
             </div>
           </section>
@@ -192,29 +195,36 @@ export default function ResultsPanel({
               <h3 id="results-audit-title">
                 State Machine Referee Audit Trail
               </h3>
-              <span>Demo execution log</span>
+              <span>Persisted execution log</span>
             </div>
             <p>
-              The entries below record local playback. No backend referee or
-              security evaluation was run.
+              {evaluation.totalDecisions} evaluated · {evaluation.approvedDecisions} approved · {evaluation.rejectedDecisions} rejected.
+              {run.error && ` ${run.error.code}: ${run.error.message}`}
             </p>
             <ol>
-              {result.auditTrail.map((event) => (
+              {result.events.map((event) => {
+                const record = run.records.find((item) => item.sequence === event.payload.decisionSequence);
+                const outcome = event.eventType === "decision.evaluated" ? record?.referee.verdict ?? "INFO"
+                  : event.eventType === "run.finished" ? evaluation.outcome : "INFO";
+                const subject = event.nodeId ?? (event.storyletId ? storyletNodes[event.storyletId] : null) ?? "SYSTEM";
+                return (
                 <li
                   key={event.id}
-                  data-audit-kind={event.kind}
-                  data-node-id={event.subject}
+                  data-audit-kind={event.eventType}
+                  data-node-id={subject}
                 >
-                  <time>{formatAuditTime(event.elapsedMs)}</time>
-                  <span className="audit-subject">{event.subject}</span>
-                  <span className="audit-description">{event.description}</span>
+                  <time>{formatAuditTime(Math.max(0, Date.parse(event.createdAt) - Date.parse(run.startedAt ?? run.createdAt)))}</time>
+                  <span className="audit-subject">{subject}</span>
+                  <span className="audit-description">{event.eventType}{event.storyletId ? ` · ${event.storyletId}` : ""}
+                    {event.eventType === "decision.evaluated" && record && ` · ${record.referee.reasonCode} · ${record.referee.violatedPolicies.map((policy) => `${policy.policyId}: ${policy.reasonCode}`).join("; ")} · ${record.referee.reasons.join("; ")} ${record.referee.evidence.join("; ")}`}
+                  </span>
                   <span
-                    className={`audit-outcome ${event.outcome === "INFO" ? "info" : "pass"}`}
+                    className={`audit-outcome ${outcome === "PASS" || outcome === "APPROVED" ? "pass" : "info"}`}
                   >
-                    {event.outcome}
+                    {outcome}
                   </span>
                 </li>
-              ))}
+              ); })}
             </ol>
           </section>
         </div>
@@ -222,7 +232,7 @@ export default function ResultsPanel({
           <div>
             <p id="results-fixture-note">
               <FlaskConical size={13} />
-              Demonstration results · not backend-verified evidence
+              Backend-persisted Referee evidence · simulated actions only
             </p>
             <span>SOAR integration and verified export are not connected.</span>
           </div>

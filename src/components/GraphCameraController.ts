@@ -30,7 +30,7 @@ export class GraphCameraController {
   private offset = new Vector3();
   private axis = new Vector3();
   private increment = new Quaternion();
-  private executionRun = -1;
+  private executionRun: number | string = -1;
   private executionNode: string | null = null;
   private executionRunning = false;
 
@@ -107,7 +107,7 @@ export class GraphCameraController {
   /** Step/run identity is the only automatic-focus trigger; manual input wins
    * for the remainder of a step and the next step may request focus again. */
   syncExecution(
-    runId: number,
+    runId: number | string,
     nodeId: string | null,
     running: boolean,
     completed: boolean,

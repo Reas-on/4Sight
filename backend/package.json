@@ -13,6 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:phase4": "PHASE4_DATABASE_TESTS=true vitest run --fileParallelism=false src/application/simulation/tests",
+    "api:contract": "tsx scripts/export-api-contract.ts",
+    "test:phase5-server": "tsx scripts/phase5-test-server.ts",
     "ai:smoke": "tsx src/ai/smoke.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts"

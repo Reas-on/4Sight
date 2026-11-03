@@ -1,14 +1,16 @@
 import { ArrowDown, ArrowUpRight, Check, CircleDot } from "lucide-react";
-import { statusFor, statusLabel, steps } from "../data/graph";
+import { statusFor, statusLabel, steps, type StepStatus } from "../data/graph";
 
 export default function StepView({
   selectedId,
   demoIndex,
   onSelect,
+  nodeStatuses,
 }: {
   selectedId: string | null;
   demoIndex: number;
   onSelect: (id: string) => void;
+  nodeStatuses?: Record<string, StepStatus>;
 }) {
   return (
     <section className="step-view" aria-label="Step-by-step demo workflow">
@@ -19,11 +21,13 @@ export default function StepView({
       </div>
       <div className="step-chain">
         {steps.map((step, i) => {
-          const status = statusFor(step.id, demoIndex);
+          const status = nodeStatuses?.[step.id] ?? statusFor(step.id, demoIndex);
           return (
             <div key={step.id}>
               <button
                 className={`step-card ${selectedId === step.id ? "selected" : ""} ${status}`}
+                data-node-id={step.id}
+                data-status={status}
                 onClick={() => onSelect(step.id)}
               >
                 <span className="step-number">
@@ -51,7 +55,7 @@ export default function StepView({
         })}
       </div>
       <p className="step-disclaimer">
-        Illustrative workflow · no commands executed or results evaluated
+        Backend-evaluated proposals · no real security commands executed
       </p>
     </section>
   );

@@ -7,7 +7,7 @@ import type { SimulationService } from '../application/simulation/simulation-ser
 import { EventStream } from '../infrastructure/streaming/event-stream.js';
 import { sshBruteForceScenario } from '../domain/narrative/scenarios/ssh-brute-force.js';
 import { AiProviderError } from '../ai/errors.js';
-import { CreateRunSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, RunSchema } from './simulation-schemas.js';
+import { CreateRunSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, ModelListSchema, RunSchema, ScenarioListSchema } from './simulation-schemas.js';
 
 const loopback = (ip: string): boolean => ip === '::1' || ip.startsWith('127.') && isIP(ip) === 4 || ip.startsWith('::ffff:127.');
 
@@ -47,7 +47,9 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
     if (request.headers['sec-fetch-site'] === 'cross-site') throw new ApplicationError('CROSS_ORIGIN_DENIED', 403);
   };
   const authorizeRun = async (request: FastifyRequest<{ Params: { id: string } }>): Promise<void> => {
-    const token = request.headers['x-run-token'];
+    const cookieName = `fourSightRun_${request.params.id}=`;
+    const cookie = request.headers.cookie?.split(';').map((part) => part.trim()).find((part) => part.startsWith(cookieName))?.slice(cookieName.length);
+    const token = request.headers['x-run-token'] ?? cookie;
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new ApplicationError('RUN_ACCESS_DENIED', 401);
     await repo.authorize(request.params.id, token);
   };
@@ -67,19 +69,27 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
   });
 
   app.get('/api/v1/scenarios', {
-    schema: { querystring: EmptyQuery, response: { 200: Type.Object({ scenarios: Type.Array(Type.Object({ id: Type.String(), version: Type.String(), title: Type.String(), initialVariants: Type.Array(Type.String()) })) }), ...ErrorResponses } },
+    schema: { querystring: EmptyQuery, response: { 200: ScenarioListSchema, ...ErrorResponses } },
   }, async () => ({ scenarios: [{ id: sshBruteForceScenario.id, version: '1.0.0', title: sshBruteForceScenario.title,
     initialVariants: ['externalSource', 'protectedInternalSource'] }] }));
 
   app.get('/api/v1/models', {
-    schema: { querystring: EmptyQuery, response: { 200: Type.Object({ models: Type.Array(Type.Object({ providerId: Type.String(), modelId: Type.Union([Type.String(), Type.Null()]), configured: Type.Boolean() })) }), ...ErrorResponses } },
+    schema: { querystring: EmptyQuery, response: { 200: ModelListSchema, ...ErrorResponses } },
   }, async () => ({ models: options.models() }));
 
-  app.post<{ Body: { scenarioId: string; initialVariant: 'externalSource' | 'protectedInternalSource' } }>('/api/v1/runs', {
-    bodyLimit: 4096, schema: { body: CreateRunSchema, querystring: EmptyQuery,
+  app.post<{ Body: { scenarioId: string; initialVariant: 'externalSource' | 'protectedInternalSource'; providerId?: string; modelId?: string | null; additionalContext?: string } }>('/api/v1/runs', {
+    bodyLimit: 12288, schema: { body: CreateRunSchema, querystring: EmptyQuery,
       response: { 202: Type.Object({ run: RunSchema, accessToken: Type.String() }), ...ErrorResponses } },
   }, async (request, reply) => {
-    const result = await options.service.create(request.body.scenarioId, request.body.initialVariant);
+    if ((request.body.providerId === undefined) !== (request.body.modelId === undefined)) throw new ApplicationError('INVALID_MODEL_SELECTION', 400);
+    if (request.body.additionalContext?.trim()) throw new ApplicationError('UNSUPPORTED_ADDITIONAL_CONTEXT', 400);
+    const selection = request.body.providerId === undefined ? undefined : {
+      providerId: request.body.providerId, modelId: request.body.modelId ?? null,
+      ...(request.body.additionalContext === undefined ? {} : { additionalContext: request.body.additionalContext }),
+    };
+    const result = await options.service.create(request.body.scenarioId, request.body.initialVariant, selection);
+    const secureCookie = request.protocol === 'https' || options.allowedOrigin?.startsWith('https://');
+    reply.header('Set-Cookie', `fourSightRun_${result.run.id}=${result.accessToken}; HttpOnly; SameSite=Strict; Path=/api/v1/runs/${result.run.id}; Max-Age=604800${secureCookie ? '; Secure' : ''}`);
     return reply.code(202).send(result);
   });
 

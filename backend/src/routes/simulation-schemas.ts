@@ -1,4 +1,4 @@
-import { Type } from '@sinclair/typebox';
+import { Type, type Static } from '@sinclair/typebox';
 import { NarrativeStateSchema, ScenarioDefinitionSchema, TransitionRecordSchema } from '../domain/narrative/schemas.js';
 import { ProposedDecisionSchema } from '../domain/referee/schemas.js';
 import { SIMULATION_STATUSES } from '../domain/simulation/types.js';
@@ -49,10 +49,22 @@ export const RunSchema = Type.Object({
 
 export const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) }, { additionalProperties: false });
 export const EmptyQuery = Type.Object({}, { additionalProperties: false });
+export const ScenarioListSchema = Type.Object({ scenarios: Type.Array(Type.Object({
+  id: Type.String(), version: Type.String(), title: Type.String(), initialVariants: Type.Array(Type.String()),
+})) });
+export const ModelListSchema = Type.Object({ models: Type.Array(Type.Object({
+  providerId: Type.String(), modelId: nullableString, configured: Type.Boolean(),
+})) });
+export type ScenarioOption = Static<typeof ScenarioListSchema>['scenarios'][number];
+export type ModelOption = Static<typeof ModelListSchema>['models'][number];
 export const CreateRunSchema = Type.Object({
   scenarioId: Type.Literal('ssh-brute-force'),
   initialVariant: Type.Union([Type.Literal('externalSource'), Type.Literal('protectedInternalSource')]),
+  providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+  modelId: Type.Optional(Type.Unsafe<string | null>({ type: ['string', 'null'] })),
+  additionalContext: Type.Optional(Type.String({ maxLength: 8000 })),
 }, { additionalProperties: false });
+export type CreateRunRequest = Static<typeof CreateRunSchema>;
 export const ErrorResponses = Object.fromEntries([400, 401, 403, 404, 409, 413, 429, 500, 503].map((code) => [code, ErrorSchema]));
 
 export const AuditEventSchema = Type.Object({
@@ -62,6 +74,7 @@ export const AuditEventSchema = Type.Object({
   payload: Type.Union([
     Type.Object({ status: Type.String() }, { additionalProperties: false }),
     Type.Object({ decisionSequence: Type.Integer(), verdict: Type.String(), violatedPolicyIds: Type.Array(Type.String()) }, { additionalProperties: false }),
+    Type.Object({ decisionSequence: Type.Integer() }, { additionalProperties: false }),
     Type.Object({ transition: TransitionRecordSchema }, { additionalProperties: false }),
     Type.Object({ status: Type.String(), outcome: Type.String(), reasonCode: Type.String() }, { additionalProperties: false }),
   ]),

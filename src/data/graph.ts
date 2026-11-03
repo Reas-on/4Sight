@@ -1,4 +1,4 @@
-export type StepStatus = "ready" | "active" | "complete";
+export type StepStatus = "ready" | "active" | "complete" | "failed" | "rejected" | "skipped" | "not-evaluated";
 export type WorkflowStep = {
   id: string;
   name: string;
@@ -299,7 +299,8 @@ export function statusFor(id: string, demoIndex: number): StepStatus {
 }
 export const statusLabel = (status: StepStatus) =>
   status === "complete"
-    ? "Demo complete"
+    ? "Passed"
     : status === "active"
-      ? "Demo in progress"
-      : "Not executed";
+      ? "Running"
+      : status === "rejected" ? "Referee rejected" : status === "failed" ? "Execution failed"
+        : status === "skipped" ? "Skipped · contextual node" : status === "not-evaluated" ? "Not evaluated" : "Pending";

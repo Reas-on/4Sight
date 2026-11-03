@@ -23,18 +23,25 @@ export class SimulationService {
   constructor(readonly repository: SimulationRepository, private readonly providerFactory: ProviderFactory,
     private readonly reportFailure: (code: string) => void = () => undefined) {}
 
-  create(scenarioId: string, initialVariant: InitialVariant): Promise<{ run: DurableRun; accessToken: string }> {
-    const task = this.createRun(scenarioId, initialVariant);
+  create(scenarioId: string, initialVariant: InitialVariant,
+    selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
+    const task = this.createRun(scenarioId, initialVariant, selection);
     this.creations.add(task);
     return task.finally(() => this.creations.delete(task));
   }
 
-  private async createRun(scenarioId: string, initialVariant: InitialVariant): Promise<{ run: DurableRun; accessToken: string }> {
+  private async createRun(scenarioId: string, initialVariant: InitialVariant,
+    selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
     if (scenarioId !== sshBruteForceScenario.id) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
     this.checkCapacity();
     this.reservations += 1;
     try {
       const provider = this.providerFactory(initialVariant);
+      if (selection?.additionalContext?.trim()) throw new ApplicationError('UNSUPPORTED_ADDITIONAL_CONTEXT', 400);
+      const selectedProvider = provider.id.startsWith('fixture-') ? 'fixture' : provider.id;
+      if (selection && (selection.providerId !== selectedProvider || selection.modelId !== (provider.provenance?.model ?? null))) {
+        throw new ApplicationError('PROVIDER_CONFIGURATION_CHANGED', 409);
+      }
       const accessToken = randomBytes(32).toString('hex');
       const created = await this.repository.create({
         scenario: immutableDataSnapshot(sshBruteForceScenario), scenarioVersion: '1.0.0', initialVariant,
@@ -125,6 +132,8 @@ export class SimulationService {
           return;
         }
         const sequence = run.records.length + 1;
+        run = await this.repository.startStep(run.id, run.revision);
+        if (signal.aborted) return;
         const raw = await requestDecision(provider, Object.freeze({
           runId: run.id, sequence, scenario: immutableDataSnapshot(run.configuration.scenario),
           state: immutableDataSnapshot(run.narrative), selectedStorylet: immutableDataSnapshot(resolution.storylet),

@@ -90,7 +90,7 @@ describe.skipIf(!enabled)('Phase 4 live HTTP and PostgreSQL API/SSE', () => {
     const extra = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ scenarioId: 'ssh-brute-force', initialVariant: 'externalSource', providerUrl: 'http://evil.invalid' }) });
     expect(extra.status).toBe(400);
-    const oversized = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: 'x'.repeat(5000) }) });
+    const oversized = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: 'x'.repeat(13000) }) });
     expect(oversized.status).toBe(413);
     expect((await fetch(`${base}/api/v1/runs/not-a-uuid`)).status).toBe(400);
     const { run, accessToken } = await create();
@@ -164,6 +164,27 @@ describe.skipIf(!enabled)('Phase 4 live HTTP and PostgreSQL API/SSE', () => {
     await unsafe.close();
   });
 
+  it('supports HttpOnly run recovery, validates model selection and rejects unmapped context', async () => {
+    const create = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenarioId: 'ssh-brute-force', initialVariant: 'externalSource', providerId: 'fixture', modelId: null, additionalContext: '' }) });
+    expect(create.status).toBe(202);
+    const cookie = create.headers.get('set-cookie')!;
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+    const { run } = await create.json() as { run: { id: string } };
+    const recovered = await fetch(`${base}/api/v1/runs/${run.id}`, { headers: { cookie: cookie.split(';')[0]! } });
+    expect(recovered.status).toBe(200);
+    const stream = await fetch(`${base}/api/v1/runs/${run.id}/events`, { headers: { cookie: cookie.split(';')[0]! }, signal: AbortSignal.timeout(5000) });
+    expect(await stream.text()).toContain('event: step.started');
+    const wrong = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenarioId: 'ssh-brute-force', initialVariant: 'externalSource', providerId: 'gemini', modelId: 'unconfigured' }) });
+    expect(wrong.status).toBe(409);
+    const unsupported = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scenarioId: 'ssh-brute-force', initialVariant: 'externalSource', additionalContext: 'change policy' }) });
+    expect(unsupported.status).toBe(400);
+    expect(await unsupported.json()).toMatchObject({ error: { code: 'UNSUPPORTED_ADDITIONAL_CONTEXT' } });
+  });
+
   it('requires the configured protective token even from localhost and rejects unsafe browser origins', async () => {
     await app.close();
     const access = 'phase4-test-protective-token-32-chars';
@@ -174,4 +195,5 @@ describe.skipIf(!enabled)('Phase 4 live HTTP and PostgreSQL API/SSE', () => {
     expect((await fetch(`${base}/api/v1/scenarios`, { headers: { authorization: `Bearer ${access}` } })).status).toBe(200);
     expect((await fetch(`${base}/api/v1/scenarios`, { headers: { authorization: `Bearer ${access}`, origin: 'https://cross.invalid' } })).status).toBe(403);
   });
+
 });

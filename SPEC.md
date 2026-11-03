@@ -1,6 +1,6 @@
-# 4Sight Sandbox — standalone visual demonstration
+# 4Sight Sandbox — visual workspace contract
 
-This is a new frontend, with no connection to a backend, LLM, SOAR, or evaluation service. Every execution state is a **simulated demonstration**, never an evaluated security result.
+**Phase 5 update:** the frontend now uses the durable backend run lifecycle, ordered SSE and persisted Referee evaluation. `README.md`'s Phase 5 section describes the active integration and trust boundary. The original offline lifecycle/fixture descriptions below are historical design references only; `useDemonstration` is not the application execution path. Graph IDs/layout, camera, shortcuts and visual design remain preserved. All proposed security actions remain simulated; there is no SOAR/host execution.
 
 ## Workflow contract
 

@@ -13,6 +13,7 @@ import {
   statusFor,
   statusLabel,
   steps,
+  type StepStatus,
 } from "../data/graph";
 
 export default function NodeDetails({
@@ -21,12 +22,14 @@ export default function NodeDetails({
   compact = false,
   onClose,
   onSelect,
+  nodeStatuses,
 }: {
   id: string | null;
   demoIndex: number;
   compact?: boolean;
   onClose?: () => void;
   onSelect: (id: string) => void;
+  nodeStatuses?: Record<string, StepStatus>;
 }) {
   const node = id ? nodeById.get(id) : undefined;
   if (!node)
@@ -42,7 +45,7 @@ export default function NodeDetails({
       </div>
     );
   const step = steps.find((step) => step.id === node.parentId)!;
-  const status = statusFor(node.id, demoIndex);
+  const status = nodeStatuses?.[node.id] ?? statusFor(node.id, demoIndex);
   return (
     <div
       className={`node-detail ${compact ? "compact" : ""}`}
@@ -110,9 +113,9 @@ export default function NodeDetails({
           <div className="validation-note">
             <CircleDot size={14} />
             <p>
-              No validation has been performed.
+              {nodeStatuses ? statusLabel(status) : "No validation has been performed."}
               <br />
-              <span>This workspace demonstrates the interface.</span>
+              <span>{nodeStatuses ? "Authoritative run state · simulated actions only." : "This workspace demonstrates the interface."}</span>
             </p>
           </div>
         </>

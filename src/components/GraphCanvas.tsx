@@ -8,7 +8,7 @@ import {
 } from "react";
 import * as THREE from "three";
 import { AlertCircle, Crosshair } from "lucide-react";
-import { graph, neighbors, steps } from "../data/graph";
+import { graph, neighbors, steps, type StepStatus } from "../data/graph";
 import { nodeColor } from "../data/nodeColors";
 import { INTRO_TIMELINE } from "../data/intro";
 import {
@@ -41,7 +41,11 @@ type Props = {
   reducedMotion: boolean;
   demoIndex: number;
   running: boolean;
-  runId: number;
+  runId: number | string;
+  nodeStatuses?: Record<string, StepStatus>;
+  activeNodeId?: string | null;
+  terminal?: boolean;
+  executionIdentity?: string;
   showContext: boolean;
   visible: boolean;
 };
@@ -469,15 +473,15 @@ const GraphCanvas = memo(
           previousImmersive = state.isImmersive;
         }
         const executionNode = state.running
-          ? (steps[state.demoIndex]?.id ?? null)
+          ? (state.activeNodeId !== undefined ? state.activeNodeId : steps[state.demoIndex]?.id ?? null)
           : null;
         cameraController.syncExecution(
-          state.runId,
+          state.executionIdentity ?? state.runId,
           executionNode,
           state.running,
-          state.demoIndex >= steps.length,
+          state.terminal ?? state.demoIndex >= steps.length,
         );
-        const nextExecutionKey = `${state.runId}:${executionNode ?? ""}`;
+        const nextExecutionKey = `${state.executionIdentity ?? state.runId}:${executionNode ?? ""}`;
         if (nextExecutionKey !== executionKey) {
           executionKey = nextExecutionKey;
           executionStarted = now;
@@ -538,7 +542,7 @@ const GraphCanvas = memo(
                     ? 0.3
                     : 0.19);
           mesh.material.opacity += (alpha - mesh.material.opacity) * blend;
-          materialColor.setHex(nodeColor(node.id, state.demoIndex));
+          materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses));
           const selected =
             executionNode === node.id || state.selectedNodeId === node.id;
           materialColor.lerp(
@@ -617,6 +621,7 @@ const GraphCanvas = memo(
         );
         scene.updateMatrixWorld(true);
         labels.forEach((label) => {
+          label.element.dataset.status = state.nodeStatuses?.[label.id] ?? "ready";
           label.mesh.getWorldPosition(projected);
           projected.project(camera);
           const related =

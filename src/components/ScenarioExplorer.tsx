@@ -19,6 +19,7 @@ type Props = {
   open: boolean;
   selectedSource: ImportedSource | null;
   importedSources: ImportedSource[];
+  executableSources?: ImportedSource[];
   onConfirm: (source: ImportedSource) => void;
   onDismiss: () => void;
 };
@@ -27,6 +28,7 @@ export default function ScenarioExplorer({
   open,
   selectedSource,
   importedSources,
+  executableSources = [],
   onConfirm,
   onDismiss,
 }: Props) {
@@ -86,8 +88,8 @@ export default function ScenarioExplorer({
     : category === "local_file"
       ? importedSources
       : category === "builtin"
-        ? builtinScenarios
-        : [...builtinScenarios, ...importedSources];
+        ? [...executableSources, ...builtinScenarios]
+        : [...executableSources, ...builtinScenarios, ...importedSources];
   const techniques = [
     ...new Set(sources.flatMap((source) => source.mitreTechniqueIds)),
   ].sort();
@@ -273,7 +275,7 @@ export default function ScenarioExplorer({
                 <p className="explorer-source-note">
                   {adapter
                     ? `${adapter.contentType} · samples only. ${adapter.description}`
-                    : "Local library and session imports. The original Endpoint compromise demo is the only supported demonstration."}
+                    : "Backend executable scenarios and preview-only session imports."}
                 </p>
                 <h3 className="section-label">
                   Available scenarios & material
@@ -461,8 +463,8 @@ export default function ScenarioExplorer({
                 </pre>
               </div>
               <p className="source-capability">
-                {pending.sourceType === "builtin"
-                  ? "Local reference demonstration available without additional context."
+                {pending.id.startsWith("backend:")
+                  ? "Backend executable scenario. Arbitrary Additional Context is unsupported."
                   : "Preview-only source material. Not a validated executable scenario."}
               </p>
             </>

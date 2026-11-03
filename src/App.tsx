@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useMemo,
   useState,
   type CSSProperties,
 } from "react";
@@ -46,7 +47,10 @@ import NodeDetails from "./components/NodeDetails";
 import StepView from "./components/StepView";
 import ScenarioExplorer from "./components/ScenarioExplorer";
 import ResultsPanel from "./components/ResultsPanel";
-import { useDemonstration } from "./hooks/useDemonstration";
+import { useSimulationRun } from "./hooks/useSimulationRun";
+import { useBackendCatalog } from "./hooks/useBackendCatalog";
+import { backendResult, nodePresentation, scenarioSources } from "./data/backendPresentation";
+import type { RunInput } from "./api/types";
 import {
   graph,
   neighbors,
@@ -63,12 +67,9 @@ import {
   type CursorMode,
 } from "./hooks/useHoldShortcut";
 import { useIntroSound } from "./hooks/useIntroSound";
-import { demoAudioEvents } from "./data/demoAudioEvents";
 import {
   ADDITIONAL_CONTEXT_MAX_LENGTH,
   additionalContextError,
-  builtinScenarios,
-  compositionBlockReason,
   sourceLabels,
   type ImportedSource,
   type ScenarioWorkspace,
@@ -101,25 +102,43 @@ export default function App() {
   const [compactOpen, setCompactOpen] = useState(false);
   const [view, setView] = useState<"graph" | "steps">("graph");
   const [showContext, setShowContext] = useState(true);
-  const [selectedAgent, setSelectedAgent] = useState<"demo-runner" | "none">(
-    "demo-runner",
-  );
+  const [selectedAgent, setSelectedAgent] = useState("");
+  const { scenarios, models, catalogError, loading } = useBackendCatalog();
+  const executableSources = useMemo(() => scenarioSources(scenarios), [scenarios]);
+  const modelKey = (model: { providerId: string; modelId: string | null }) => `${model.providerId}:${model.modelId ?? ""}`;
   const [workspace, setWorkspace] = useState<ScenarioWorkspace>({
-    selectedSource: builtinScenarios[0],
+    selectedSource: null,
     additionalContext: "",
   });
   const [importedSources, setImportedSources] = useState<ImportedSource[]>([]);
   const [explorerOpen, setExplorerOpen] = useState(false);
-  const executionBlock = compositionBlockReason(workspace);
+  useEffect(() => {
+    if (executableSources.length) setWorkspace((current) => current.selectedSource ? current : { ...current, selectedSource: executableSources[0] });
+    const available = models.find((model) => model.configured);
+    if (available) setSelectedAgent((current) => current || modelKey(available));
+  }, [executableSources, models]);
+  const selectedModel = models.find((model) => modelKey(model) === selectedAgent && model.configured);
+  const supportedSource = executableSources.find((source) => source.id === workspace.selectedSource?.id);
+  const executionBlock = loading ? "Connecting to backend…" : catalogError ? `Backend connection error: ${catalogError}`
+    : !supportedSource ? "This source is preview-only. Select a backend-supported scenario in the Explorer."
+    : additionalContextError(workspace.additionalContext) ?? (workspace.additionalContext.trim() ? "Additional Context is retained, but arbitrary context is unsupported by the backend. Clear it to run."
+    : !selectedModel ? "No configured provider/model is available. Configure the backend provider."
+    : null);
   const contextError = additionalContextError(workspace.additionalContext);
   const [browserOpen, setBrowserOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const input: RunInput | null = supportedSource && selectedModel ? {
+    scenarioId: "ssh-brute-force", initialVariant: supportedSource.id.endsWith(":protectedInternalSource") ? "protectedInternalSource" : "externalSource",
+    providerId: selectedModel.providerId, modelId: selectedModel.modelId, additionalContext: workspace.additionalContext,
+  } : null;
   const {
-    demoIndex,
     running,
     runId,
-    simulationStatus,
-    evaluationResult,
+    snapshot,
+    events,
+    error: runError,
+    pending,
+    completed,
     isResultsOpen,
     pause: pauseDemonstration,
     stop: stopDemonstration,
@@ -128,26 +147,30 @@ export default function App() {
     setResultsOpen,
     toggleResults,
     canRetry,
-  } = useDemonstration(
-    executionBlock,
-    {
-      sourceId: workspace.selectedSource?.id ?? "",
-      sourceName: workspace.selectedSource?.name ?? "",
-      agent: selectedAgent,
-      additionalContext: workspace.additionalContext,
-    },
-    stopSimulationAudio,
-  );
-  const completed = simulationStatus === "completed";
-  const simulationDisabled = !!executionBlock && !completed;
+  } = useSimulationRun(input, executionBlock);
+  const simulationStatus = snapshot?.status ?? "IDLE";
+  const restoredSelection = useRef<string | null>(null);
+  useEffect(() => {
+    if (!snapshot || restoredSelection.current === snapshot.id || !executableSources.length) return;
+    restoredSelection.current = snapshot.id;
+    const source = executableSources.find((item) => item.id === `backend:${snapshot.configuration.scenario.id}:${snapshot.configuration.initialVariant}`);
+    if (source) setWorkspace((current) => ({ ...current, selectedSource: source }));
+    const providerId = snapshot.configuration.providerId.startsWith("fixture-") ? "fixture" : snapshot.configuration.providerId;
+    setSelectedAgent(`${providerId}:${snapshot.configuration.modelId ?? ""}`);
+  }, [snapshot, executableSources]);
+  const evaluationResult = backendResult(snapshot, events);
+  const { statuses: nodeStatuses, activeNodeId } = nodePresentation(snapshot, events);
+  const demoIndex = activeNodeId ? steps.findIndex((step) => step.id === activeNodeId) : -1;
+  const simulationDisabled = pending || !!runId && !snapshot || !!executionBlock && !completed && !running;
   const simulationAction = useCallback(() => {
+    if (pending) return;
     if (completed) {
       toggleResults();
       return;
     }
-    if (executionBlock) return;
+    if (executionBlock && !running) return;
     if (running)
-      stopDemonstration(); // Stop abandons progress; Pause retains it.
+      stopDemonstration();
     else runDemonstration();
   }, [
     completed,
@@ -156,6 +179,7 @@ export default function App() {
     running,
     stopDemonstration,
     runDemonstration,
+    pending,
   ]);
   const simulationActionName = completed
     ? isResultsOpen
@@ -163,7 +187,7 @@ export default function App() {
       : "Show results"
     : running
       ? "Stop demonstration"
-      : demoIndex >= 0
+      : snapshot?.status === "PAUSED"
         ? "Resume demonstration"
         : "Run demonstration";
   const confirmSource = (source: ImportedSource) => {
@@ -177,20 +201,28 @@ export default function App() {
       );
     setExplorerOpen(false);
   };
-  const previousDemoIndex = useRef(-1);
-  const previousRunId = useRef(0);
+  const audioCursor = useRef({ runId: "", sequence: 0 });
+  const audioMountedAt = useRef(Date.now());
   useEffect(() => {
-    for (const entry of demoAudioEvents(
-      previousRunId.current === runId ? previousDemoIndex.current : -1,
-      demoIndex,
-    ))
-      emitAudio(
-        entry.event,
-        entry.nodeId ? (Number(entry.nodeId.slice(-1)) - 3) * 0.15 : 0,
-      );
-    previousDemoIndex.current = demoIndex;
-    previousRunId.current = runId;
-  }, [demoIndex, runId, emitAudio]);
+    if (!runId) return;
+    if (audioCursor.current.runId !== runId) audioCursor.current = { runId, sequence: 0 };
+    for (const event of events) {
+      if (event.sequence <= audioCursor.current.sequence) continue;
+      if (Date.parse(event.createdAt) < audioMountedAt.current) {
+        audioCursor.current.sequence = event.sequence;
+        continue;
+      }
+      if (event.eventType === "step.started") emitAudio("NODE_ENTERED");
+      if (event.eventType === "transition.committed") emitAudio("NODE_COMPLETED");
+      if (event.eventType === "decision.evaluated" && event.payload.verdict === "REJECTED") emitAudio("NODE_INTERCEPTED");
+      if (event.eventType === "run.finished" && event.payload.outcome === "PASS") emitAudio("SIMULATION_COMPLETED");
+      if (event.eventType === "run.finished" && event.payload.status === "FAILED") emitAudio("NODE_FAILED");
+      audioCursor.current.sequence = event.sequence;
+    }
+  }, [events, runId, emitAudio]);
+  useEffect(() => {
+    if (snapshot?.status === "PAUSED" || snapshot?.status === "CANCELLED") stopSimulationAudio();
+  }, [snapshot?.status, stopSimulationAudio]);
   const graphApi = useRef<GraphControls>(null);
   const helpDialog = useRef<HTMLDialogElement>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
@@ -314,14 +346,7 @@ export default function App() {
     };
   }, [browserOpen]);
   const hoverNode = hoveredNodeId ? nodeById.get(hoveredNodeId) : null;
-  const demoState =
-    demoIndex >= steps.length
-      ? "Demo complete"
-      : running
-        ? "Demo running"
-        : demoIndex >= 0
-          ? "Demo paused"
-          : "Ready to explore";
+  const demoState = snapshot ? `${snapshot.status}${snapshot.evaluation ? ` · ${snapshot.evaluation.outcome}` : ""}` : pending ? "Creating run…" : "Ready to explore";
 
   return (
     <div
@@ -358,7 +383,7 @@ export default function App() {
         <div className="header-right">
           <span className="demo-badge">
             <FlaskConical size={12} />
-            Visual demo
+            Backend sandbox
           </span>
           <button
             className="icon-button help-trigger"
@@ -417,9 +442,7 @@ export default function App() {
                 <div className="select-wrap">
                   <Sparkles size={15} />
                   <span className="agent-select-value" aria-hidden="true">
-                    {selectedAgent === "demo-runner"
-                      ? "Local demo runner · simulated"
-                      : "No model connected"}
+                    {selectedModel ? `${selectedModel.providerId === "fixture" ? "Backend fixture · simulated" : selectedModel.providerId} ${selectedModel.modelId ?? ""}` : "No model connected"}
                   </span>
                   <select
                     id="agent-model"
@@ -427,15 +450,13 @@ export default function App() {
                     aria-describedby="agent-availability"
                     value={selectedAgent}
                     onChange={(event) =>
-                      setSelectedAgent(
-                        event.target.value as "demo-runner" | "none",
-                      )
+                      setSelectedAgent(event.target.value)
                     }
                   >
-                    <option value="demo-runner">
-                      Local demo runner · simulated
-                    </option>
-                    <option value="none">No model connected</option>
+                    <option value="">No model connected</option>
+                    {models.map((model) => <option key={modelKey(model)} value={modelKey(model)} disabled={!model.configured}>
+                      {model.providerId === "fixture" ? "Backend fixture · simulated" : `${model.providerId} · ${model.modelId ?? "not configured"}`}
+                    </option>)}
                   </select>
                   <ChevronDown size={13} />
                 </div>
@@ -444,9 +465,8 @@ export default function App() {
                   id="agent-availability"
                   role="status"
                 >
-                  {selectedAgent === "demo-runner"
-                    ? "Demo only · no AI model or inference connected."
-                    : "No agents/models configured. Reference playback remains local and simulated."}
+                  {selectedModel ? selectedModel.providerId === "fixture" ? "Explicit backend fixture mode · no AI inference." : "Configured backend AI provider · simulated proposals only."
+                    : catalogError ?? "No agents/models configured on the backend."}
                 </p>
               </section>
               <div className="sidebar-section scenario-section">
@@ -510,8 +530,7 @@ export default function App() {
                   id="composition-status"
                   role="status"
                 >
-                  {executionBlock ??
-                    "Ready for the built-in visual demonstration. No AI inference or evaluated security results."}
+                  {runError ?? executionBlock ?? "Ready for backend Narrative and Referee execution. No real security actions."}
                 </p>
               </div>
             </div>
@@ -558,7 +577,7 @@ export default function App() {
                     toggleResults();
                     return;
                   }
-                  if (executionBlock) return;
+                  if (pending || executionBlock && !running) return;
                   if (running) pauseDemonstration();
                   else runDemonstration();
                 }}
@@ -576,15 +595,15 @@ export default function App() {
                     ? "Evaluation unavailable"
                     : running
                       ? "Pause demonstration"
-                      : demoIndex >= 0 && demoIndex < steps.length
+                      : snapshot?.status === "PAUSED"
                         ? "Resume demo"
                         : "Run demonstration"}
                 <span>{running ? "II" : <ArrowRight size={15} />}</span>
               </button>
               <p>
-                {executionBlock
+                {runError ?? (executionBlock
                   ? "Source + context retained · not evaluated"
-                  : "Simulated execution · no evaluated results"}
+                  : "Backend-persisted evaluation · simulated actions only")}
               </p>
             </div>
             <div className="sidebar-bottom">
@@ -631,7 +650,7 @@ export default function App() {
             <div className="stage-title-main">
               <div>
                 <h1>
-                  Endpoint compromise<span className="title-dot">.</span>
+                  {snapshot?.configuration.scenario.title ?? workspace.selectedSource?.name ?? "Security playbook"}<span className="title-dot">.</span>
                 </h1>
                 <p>
                   {executionBlock
@@ -684,7 +703,11 @@ export default function App() {
                 reducedMotion={reduced}
                 demoIndex={demoIndex}
                 running={running}
-                runId={runId}
+                runId={runId ?? ""}
+                executionIdentity={`${runId ?? ""}:${events.filter((event) => event.eventType === "step.started").at(-1)?.sequence ?? 0}`}
+                nodeStatuses={nodeStatuses}
+                activeNodeId={activeNodeId}
+                terminal={completed}
                 showContext={showContext}
                 visible={view === "graph"}
               />
@@ -693,6 +716,7 @@ export default function App() {
               <StepView
                 selectedId={selectedNodeId}
                 demoIndex={demoIndex}
+                nodeStatuses={nodeStatuses}
                 onSelect={selectNode}
               />
             )}
@@ -918,6 +942,7 @@ export default function App() {
                 <NodeDetails
                   id={selectedNodeId}
                   demoIndex={demoIndex}
+                  nodeStatuses={nodeStatuses}
                   compact
                   onClose={dismissSelection}
                   onSelect={navigateToNode}
@@ -943,8 +968,7 @@ export default function App() {
             </span>
             <span>
               <FlaskConical size={11} />
-              Demonstration data<span className="footer-divider">/</span>No live
-              execution
+              Backend run<span className="footer-divider">/</span>Simulated actions
             </span>
             <button
               aria-label="Open interaction guide"
@@ -979,6 +1003,7 @@ export default function App() {
               <NodeDetails
                 id={selectedNodeId}
                 demoIndex={demoIndex}
+                nodeStatuses={nodeStatuses}
                 onSelect={navigateToNode}
                 onClose={dismissSelection}
               />
@@ -1023,12 +1048,12 @@ export default function App() {
           </div>
           <span>
             {hoverNode.kind === "workflow"
-              ? statusLabel(statusFor(hoverNode.id, demoIndex))
+              ? statusLabel(nodeStatuses[hoverNode.id] ?? statusFor(hoverNode.id, demoIndex))
               : "Display-only context · not executable"}
           </span>
           <p>
             {hoverNode.kind === "workflow"
-              ? "Illustrative state. No evaluated result."
+              ? "Persisted backend execution state."
               : "Related metadata, not a workflow step."}
           </p>
           <small>
@@ -1042,6 +1067,7 @@ export default function App() {
         open={explorerOpen}
         selectedSource={workspace.selectedSource}
         importedSources={importedSources}
+        executableSources={executableSources}
         onConfirm={confirmSource}
         onDismiss={() => setExplorerOpen(false)}
       />
@@ -1106,7 +1132,7 @@ export default function App() {
         <h2>Make room for perspective.</h2>
         <p>
           Explore the relationships behind a security playbook. Every state in
-          this workspace is a local visual demonstration.
+          execution result is supplied by the backend Referee.
         </p>
         <div className="help-rows">
           <div>
@@ -1152,7 +1178,7 @@ export default function App() {
         </div>
         <div className="help-note">
           <FlaskConical size={15} />
-          No live model, endpoint actions, or evaluated security results.
+          Backend-evaluated proposals only. No real endpoint or SOAR actions.
         </div>
         <button
           className="run-button"

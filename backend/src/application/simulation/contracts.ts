@@ -44,6 +44,7 @@ export interface SimulationRepository {
   read(id: string): Promise<DurableRun>;
   authorize(id: string, token: string): Promise<void>;
   lifecycle(id: string, action: SimulationLifecycleAction): Promise<DurableRun>;
+  startStep(id: string, revision: number): Promise<DurableRun>;
   commitDecision(id: string, revision: number, stateVersion: number, decision: unknown): Promise<DurableRun>;
   fail(id: string, revision: number, code: string): Promise<DurableRun>;
   events(id: string, after: number, limit?: number): Promise<readonly AuditEvent[]>;

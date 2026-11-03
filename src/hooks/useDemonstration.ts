@@ -7,7 +7,7 @@ import {
 } from "../data/demoLifecycle";
 
 export const DEMO_STEP_DURATION = 1600;
-/** Owns the original demo progression and its single run-scoped execution timer. */
+/** Legacy offline fixture harness for tests only. App uses useSimulationRun; no runtime fallback. */
 export function useDemonstration(
   executionBlock: string | null,
   configuration: RunConfiguration,
