@@ -23,10 +23,11 @@ const app = buildApp({
   env: { ...env, DATABASE_URL: url.href, HOST: '127.0.0.1', PORT: 3101, LOG_LEVEL: 'silent', SIMULATION_MODE: 'ai',
     SIMULATION_ALLOWED_ORIGIN: 'http://127.0.0.1:4173' },
   simulationProviderFactory: (_variant, scenarioId) => scenarioId === BRANCH_SCENARIO_ID
-    ? { ...createBranchFixtureProvider(), id: 'gemini', provenance: { provider: 'gemini', model: 'gemini-2.5-flash' },
-      decide: async context => { await setTimeout(80, undefined, { signal: context.signal }); return createBranchFixtureProvider().decide(context); } }
-    : new GeminiDecisionProvider({ apiKey: 'test-only-key', model: 'gemini-2.5-flash', requestTimeoutMs: 1000, maxRetries: 0 }, {
+    ? { ...createBranchFixtureProvider(), id: 'gemini', decisionTimeoutMs: 5000, provenance: { provider: 'gemini', model: 'gemini-2.5-flash' },
+      decide: async context => { await setTimeout(1600, undefined, { signal: context.signal }); return createBranchFixtureProvider().decide(context); } }
+    : new GeminiDecisionProvider({ apiKey: 'test-only-key', model: 'gemini-2.5-flash', requestTimeoutMs: 5000, maxRetries: 0 }, {
     fetch: async (_url, init) => {
+      await setTimeout(1600, undefined, { signal: init?.signal ?? undefined });
       const body = JSON.parse(String(init?.body));
       const context = JSON.parse(body.contents[0].parts[0].text).backendContext;
       // The protected variant intentionally proposes an unsafe block to exercise

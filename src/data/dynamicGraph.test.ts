@@ -31,4 +31,20 @@ describe('authoritative dynamic graph', () => {
     expect(projected.dataset.edges).toEqual([{ source: 'N-01', target: 'N-02', kind: 'workflow' }]);
     expect(dynamicGraph(metadata, snapshot, []).dataset).toEqual(projected.dataset);
   });
+  it('keeps live step starts visible even when a snapshot is ahead; hydrate uses the snapshot', () => {
+    const start = { ...eventFixture(3), eventType: 'step.started', storyletId: 'branch-unsafe-block', nodeId: 'N-02' };
+    const reveal = { ...eventFixture(2), eventType: 'graph.revealed', payload: { nodes: [n2] } };
+    const ahead = { ...runFixture(), eventSequence: 9, graph: { sequence: 9, nodes: [metadata.root, { ...n2, status: 'REJECTED' as const }] } };
+    const live = dynamicGraph(metadata, ahead, [reveal, start], undefined, true);
+    expect(live.activeNodeId).toBe('N-02');
+    expect(live.activeSequence).toBe(3);
+    expect(live.statuses['N-02']).toBe('active');
+    const restored = dynamicGraph(metadata, ahead, []);
+    expect(restored.statuses['N-02']).toBe('rejected');
+    expect(restored.animateNodeIds).toEqual([]);
+    const verdict = { ...eventFixture(4), nodeId: 'N-02', eventType: 'decision.evaluated', payload: { verdict: 'REJECTED' } };
+    const settled = dynamicGraph(metadata, ahead, [reveal, start, verdict], undefined, true);
+    expect(settled.activeSequence).toBe(live.activeSequence);
+    expect(settled.activeNodeId).toBeNull();
+  });
 });

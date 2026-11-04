@@ -40,6 +40,8 @@ describe.skipIf(process.env.PHASE4_DATABASE_TESTS !== 'true')('dynamic branch Po
     const text = await (await fetch(`${base}/api/v1/runs/${run.id}/events`, { headers, signal: AbortSignal.timeout(8000) })).text();
     const events = text.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)) as AuditEvent);
     const snapshot = await (await fetch(`${base}/api/v1/runs/${run.id}`, { headers })).json() as DurableRun;
+    const result = await (await fetch(`${base}/api/v1/runs/${run.id}/result`, { headers })).json() as { ruleAdherence: number | null };
+    expect(result.ruleAdherence).toBe(75);
     const selected = variant === 'externalSource' ? 'N-05' : 'N-04';
     const skipped = selected === 'N-04' ? 'N-05' : 'N-04';
     expect(snapshot).toMatchObject({ status: 'COMPLETED', error: null, evaluation: { outcome: 'FAIL', approvedDecisions: 3, rejectedDecisions: 1 },

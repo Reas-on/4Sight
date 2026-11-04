@@ -28,6 +28,20 @@ function harness(initial = runFixture()) {
 beforeEach(() => sessionStorage.clear());
 afterEach(cleanup);
 describe("authoritative frontend run integration", () => {
+  it('does not block the SSE reader on snapshot fetches for intermediate events', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useSimulationRun(input, null, h.api, h.consume));
+    act(() => result.current.run());
+    await waitFor(() => expect(h.callbacks).toHaveLength(1));
+    const calls = vi.mocked(h.api.snapshot).mock.calls.length;
+    await act(async () => {
+      await h.callbacks[0]({ ...eventFixture(1), eventType: 'graph.revealed', payload: { nodes: [] } });
+      await h.callbacks[0](eventFixture(2));
+      await h.callbacks[0]({ ...eventFixture(3), eventType: 'transition.committed' });
+    });
+    expect(result.current.events.map(event => event.sequence)).toEqual([1, 2, 3]);
+    expect(h.api.snapshot).toHaveBeenCalledTimes(calls);
+  });
   it('blocks presentation switching for active/paused runs and detaches completed runs without backend cancellation', async () => {
     const h = harness();
     const { result } = renderHook(() => useSimulationRun(input, null, h.api, h.consume));
@@ -154,6 +168,7 @@ describe("authoritative frontend run integration", () => {
     act(() => result.current.run());
     await waitFor(() => expect(result.current.snapshot?.status).toBe("COMPLETED"), { timeout: 2500 });
     expect(result.current.events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(result.current.liveGraph).toBe(false);
     expect(h.api.create).toHaveBeenCalledTimes(1);
     expect(result.current.isResultsOpen).toBe(true);
   });

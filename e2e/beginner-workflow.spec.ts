@@ -1,5 +1,95 @@
 import { expect, test } from "@playwright/test";
 
+test('P0 execution, dynamic focus and branch entrance smoke', async ({ page }, testInfo) => {
+  test.setTimeout(90000);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    const frames: Record<string, unknown>[] = [];
+    Object.assign(window, { graphFrames: frames });
+    const inspect = () => {
+      const graph = document.querySelector<HTMLElement>('[data-testid="graph-renderer"]');
+      if (graph && (graph.dataset.executionNode || graph.dataset.revealingNodes)) {
+        frames.push({ ...graph.dataset, nodes: [...document.querySelectorAll<HTMLElement>('.graph-label')].map(node => ({
+          text: node.textContent, opacity: node.style.opacity, transform: node.style.transform, ...node.dataset,
+        })) });
+        if (frames.length > 1200) frames.shift();
+      }
+      requestAnimationFrame(inspect);
+    };
+    requestAnimationFrame(inspect);
+  });
+  await page.goto('/');
+  const choose = async (name: RegExp) => {
+    await page.getByRole('button', { name: 'Open Scenario Explorer' }).click();
+    await page.getByRole('button', { name }).click();
+    await page.getByRole('button', { name: 'Use Scenario', exact: true }).click();
+    await expect(page.locator('.graph-label')).toHaveCount(1);
+  };
+  const results = page.getByRole('dialog', { name: 'Simulation Results' });
+  const graph = page.getByTestId('graph-renderer');
+  const runEvidence = async () => {
+    const id = await page.locator('.app').getAttribute('data-run-id');
+    const snapshot = await (await page.request.get(`/api/v1/runs/${id}`)).json();
+    const result = await (await page.request.get(`/api/v1/runs/${id}/result`)).json();
+    const replay = await (await page.request.get(`/api/v1/runs/${id}/events`)).text();
+    const events = replay.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)));
+    return { id, scenario: snapshot.configuration.scenario.id, status: snapshot.status, version: snapshot.narrative.version,
+      transitions: events.filter(event => event.eventType === 'transition.committed').length,
+      decisions: snapshot.records.length, eventCount: events.length, adherence: result.ruleAdherence,
+      nodes: await page.locator('.graph-label').count(), edges: Number(await graph.getAttribute('data-edge-count')),
+      consumed: await page.locator('[data-audit-kind]').count(), records: snapshot.records, world: snapshot.narrative.world };
+  };
+  await choose(/Suspicious SSH Logins — Beginner Walkthrough · External source/);
+  await page.getByRole('button', { name: 'Run demonstration', exact: true }).click();
+  await expect(graph).toHaveAttribute('data-focus-node', 'N-04', { timeout: 10000 });
+  await page.screenshot({ path: testInfo.outputPath('ssh-running-focus.png') });
+  await expect(results).toBeVisible({ timeout: 15000 });
+  const ssh = await runEvidence();
+  expect(ssh).toMatchObject({ transitions: 8, decisions: 1, nodes: 8, adherence: 100, status: 'COMPLETED' });
+  await expect(results.locator('.results-metrics > div').nth(2).locator('strong')).toHaveText('100%');
+  await page.getByRole('button', { name: 'Close simulation results' }).click();
+  await choose(/Policy Rejection — Alternative Responses · Protected internal/);
+  await page.getByRole('button', { name: 'Run demonstration', exact: true }).click();
+  await expect(graph).toHaveAttribute('data-focus-node', 'N-02', { timeout: 10000 });
+  await expect(page.getByRole('button', { name: 'Open Scenario Explorer' })).toBeDisabled();
+  await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-testid="graph-renderer"]')?.dataset.revealingEdges?.includes('N-02>N-04'));
+  await page.screenshot({ path: testInfo.outputPath('branch-entrance.png') });
+  await expect(graph).toHaveAttribute('data-focus-node', 'N-03');
+  await expect(results).toBeVisible({ timeout: 15000 });
+  const branch = await runEvidence();
+  expect(branch).toMatchObject({ transitions: 4, decisions: 4, nodes: 5, adherence: 75, status: 'COMPLETED', world: { responseStatus: 'none' } });
+  expect(branch.records[1].referee.verdict).toBe('REJECTED');
+  expect(branch.records[1].transition).toBeNull();
+  await expect(results.locator('.results-metrics > div').nth(2).locator('strong')).toHaveText('75%');
+  await expect(page.locator('.graph-label').filter({ hasText: 'N-05' })).toHaveAttribute('data-status', 'skipped');
+  const frames = await page.evaluate(() => (window as unknown as { graphFrames: Record<string, any>[] }).graphFrames);
+  const focused = frames.filter(frame => frame.focusNode === 'N-02');
+  expect(focused.length).toBeGreaterThan(1);
+  expect(new Set(focused.map(frame => frame.cameraTarget)).size).toBeGreaterThan(1);
+  expect(focused.some(frame => Math.abs(Number(frame.cameraTarget.split(',')[0]) - 4.5) < 0.1)).toBe(true);
+  expect(frames.some(frame => frame.nodes.some((node: Record<string, string>) => node.parentId === 'N-02' && Number(node.entranceProgress) > 0 && Number(node.entranceProgress) < 1 && Number(node.nodeScale) < 1 && Number(node.edgeProgress) > 0))).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('branch-results.png') });
+  const evidence = { ssh: { ...ssh, records: undefined }, branch: { ...branch, records: undefined },
+    focusTargets: [...new Set(frames.map(frame => frame.focusNode))], animatedFrames: frames.filter(frame => frame.revealingEdges).length };
+  console.log('P0 evidence:', JSON.stringify(evidence));
+  await testInfo.attach('run-evidence', { body: JSON.stringify(evidence, null, 2), contentType: 'application/json' });
+  await page.reload();
+  await expect(results).toBeVisible();
+  await expect(page.locator('.graph-label')).toHaveCount(5);
+  await expect(graph).toHaveAttribute('data-reveal-count', '0');
+  await page.getByRole('button', { name: 'Close simulation results' }).click();
+  await page.locator('canvas').focus();
+  await page.keyboard.press('r');
+  await expect(page.locator('.graph-label')).toHaveCount(1);
+  await expect(page.locator('.app')).not.toHaveAttribute('data-run-id', branch.id!);
+  await expect(results).toBeVisible({ timeout: 20000 });
+  await expect(page.locator('.graph-label')).toHaveCount(5);
+  await expect(graph).toHaveAttribute('data-reveal-count', '4');
+  expect(errors).toEqual([]);
+});
+
 test("beginner committed events → branch/camera/Inspector → persisted results", async ({ page }) => {
   test.setTimeout(60000);
   await page.goto("/");

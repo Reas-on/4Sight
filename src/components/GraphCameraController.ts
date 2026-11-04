@@ -33,6 +33,9 @@ export class GraphCameraController {
   private executionRun: number | string = -1;
   private executionNode: string | null = null;
   private executionRunning = false;
+  private pendingFocus: { runId: number | string; nodeId: string } | null = null;
+  private focusNode: string | null = null;
+  private executionHadFocus = false;
 
   constructor(
     private camera: PerspectiveCamera,
@@ -85,7 +88,8 @@ export class GraphCameraController {
   }
   navigateToNode(id: string, execution = false) {
     const target = this.getNodePosition(id);
-    if (!target) return;
+    if (!target) return false;
+    this.focusNode = execution ? id : null;
     this.moveTo(
       target,
       execution
@@ -103,6 +107,7 @@ export class GraphCameraController {
           ),
       execution ? EXECUTION_FOCUS_SECONDS : CAMERA_TRANSITION_SECONDS,
     );
+    return true;
   }
   /** Step/run identity is the only automatic-focus trigger; manual input wins
    * for the remainder of a step and the next step may request focus again. */
@@ -117,15 +122,37 @@ export class GraphCameraController {
       nodeId !== this.executionNode ||
       running !== this.executionRunning;
     if (!changed) return;
-    const wasRunning = this.executionRunning;
+    if (running && !this.executionRunning) this.executionHadFocus = false;
     this.executionRun = runId;
     this.executionNode = nodeId;
     this.executionRunning = running;
+    this.pendingFocus = null;
+    this.focusNode = null;
     this.cancelTransition();
     if (this.manual || this.keys.size || this.hasWheelOrbit()) return;
-    if (running && nodeId) this.navigateToNode(nodeId, true);
-    else if (wasRunning && completed) this.centerGraph();
+    if (running && nodeId) {
+      this.pendingFocus = { runId, nodeId };
+      this.resolvePendingFocus();
+    }
+    else if (completed && this.executionHadFocus) {
+      this.executionHadFocus = false;
+      this.centerGraph();
+    }
   }
+  /** Retry on graph readiness, not a timeout. Step changes/cancel/manual input
+   * invalidate the request, so late node registration cannot steal the camera. */
+  private resolvePendingFocus() {
+    const pending = this.pendingFocus;
+    if (!pending || this.manual || this.keys.size || this.hasWheelOrbit()) return;
+    if (pending.runId !== this.executionRun || pending.nodeId !== this.executionNode || !this.executionRunning) {
+      this.pendingFocus = null; return;
+    }
+    if (this.navigateToNode(pending.nodeId, true)) {
+      this.pendingFocus = null;
+      this.executionHadFocus = true;
+    }
+  }
+  get executionFocusNode() { return this.focusNode; }
   centerGraph() {
     this.moveTo(new Vector3(), this.fitDistance());
   }
@@ -170,6 +197,8 @@ export class GraphCameraController {
   }
   cancelTransition() {
     this.transition = null;
+    this.pendingFocus = null;
+    this.focusNode = null;
   }
   get isTransitioning() {
     return this.transition !== null;
@@ -178,6 +207,7 @@ export class GraphCameraController {
     this.cancelWheelOrbit();
     this.cancelTransition();
     this.manual = true;
+    this.focusNode = null;
     this.yawVelocity = 0;
     this.pitchVelocity = 0;
     this.lastManual = performance.now();
@@ -224,6 +254,7 @@ export class GraphCameraController {
     this.lastManual = performance.now();
   }
   update(dt: number, now: number, immersive: boolean, reduced: boolean) {
+    this.resolvePendingFocus();
     if (this.transition && !this.manual) {
       const move = this.transition;
       move.elapsed += dt;

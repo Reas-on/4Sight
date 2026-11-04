@@ -157,9 +157,10 @@ export default function App() {
     toggleResults,
     canRetry,
     clearPresentation,
+    liveGraph,
   } = useSimulationRun(input, executionBlock);
   const projection = useMemo(() => dynamicGraph(metadata, snapshot, events,
-    scenarioLoad === "READY" && !metadata ? workspace.selectedSource ?? undefined : undefined), [metadata, snapshot, events, scenarioLoad, workspace.selectedSource]);
+    scenarioLoad === "READY" && !metadata ? workspace.selectedSource ?? undefined : undefined, liveGraph), [metadata, snapshot, events, scenarioLoad, workspace.selectedSource, liveGraph]);
   const graph = projection.dataset;
   const { steps, neighbors, nodeById } = graph;
   const simulationStatus = snapshot?.status ?? "IDLE";
@@ -743,6 +744,7 @@ export default function App() {
               <GraphCanvas
                 dataset={graph}
                 graphIdentity={`${workspace.selectedSource?.id ?? ""}:${runId ?? ""}`}
+                animateNodeIds={projection.animateNodeIds}
                 ref={graphApi}
                 selectedNodeId={selectedNodeId}
                 hoveredNodeId={hoveredNodeId}
@@ -757,10 +759,10 @@ export default function App() {
                 demoIndex={demoIndex}
                 running={running}
                 runId={runId ?? ""}
-                executionIdentity={`${runId ?? ""}:${activeNodeId ?? ""}`}
+                executionIdentity={`${runId ?? ""}:${projection.activeSequence}`}
                 nodeStatuses={nodeStatuses}
                 activeNodeId={activeNodeId}
-                terminal={completed}
+                terminal={snapshot?.status === 'COMPLETED'}
                 showContext={showContext}
                 visible={view === "graph"}
               />

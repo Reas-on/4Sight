@@ -17,6 +17,7 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
   const [runId, setRunId] = useState<string | null>(savedRun);
   const [snapshot, setSnapshot] = useState<DurableRun | null>(null);
   const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [liveGraph, setLiveGraph] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [isResultsOpen, setResultsOpen] = useState(false);
@@ -63,7 +64,9 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
             if (event.runId !== runId) return;
             setEvents((previous) => previous.some((item) => item.sequence === event.sequence) ? previous : [...previous, event].sort((a, b) => a.sequence - b.sequence));
             cursor = Math.max(cursor, event.sequence);
-            if (event.eventType !== "step.started") await reconcile();
+            // Do not stall the SSE reader behind snapshot round-trips. A snapshot
+            // may already be several steps ahead of the event being delivered.
+            if (event.eventType === "run.finished") void reconcile().catch(() => undefined);
           });
           const current = await reconcile();
           if (signal.aborted) return;
@@ -71,6 +74,9 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
           if (isTerminal(current.status) && cursor >= current.eventSequence) return;
         } catch (failure) {
           if (signal.aborted) return;
+          // After a gap, hydrate topology from the latest durable snapshot rather
+          // than replaying missed entrances or waiting on a broken stream.
+          setLiveGraph(false);
           if (failure instanceof ApiError && [401, 404].includes(failure.status)) {
             saveRun(null); setRunId(null); setSnapshot(null); setEvents([]);
             setError("Saved run is unavailable or access expired."); return;
@@ -127,7 +133,7 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
         }
       }
       if (!valid()) return;
-      setSnapshot(null); setEvents([]); setRunId(null); activeId.current = null; saveRun(null);
+      setSnapshot(null); setEvents([]); setLiveGraph(true); setRunId(null); activeId.current = null; saveRun(null);
       const created = await api.create(value.input!, controller.signal);
       if (!valid()) return;
       activeId.current = created.id; saveRun(created.id); setRunId(created.id); accept(created);
@@ -145,11 +151,11 @@ export function useSimulationRun(input: RunInput | null, executionBlock: string 
   }, [api, accept]);
 
   return {
-    runId, snapshot, events, error, pending, isResultsOpen, setResultsOpen,
+    runId, snapshot, events, error, pending, isResultsOpen, setResultsOpen, liveGraph,
     clearPresentation: () => {
       if (busy.current || latest.current.snapshot && !isTerminal(latest.current.snapshot.status) || activeId.current && !latest.current.snapshot) return false;
       generation.current++; streamAbort.current?.abort(); activeId.current = null;
-      setRunId(null); saveRun(null); setSnapshot(null); setEvents([]); setResultsOpen(false); setError(null);
+      setRunId(null); saveRun(null); setSnapshot(null); setEvents([]); setLiveGraph(false); setResultsOpen(false); setError(null);
       return true;
     },
     run: () => void perform("run"), retry: () => void perform("retry"),

@@ -3,6 +3,7 @@ import type { ImportedSource } from "./scenario";
 import { steps, type StepStatus } from "./graph";
 import { BEGINNER_SCENARIO_ID, beginnerNodes } from "../../backend/src/domain/narrative/scenarios/ssh-beginner";
 import { BRANCH_SCENARIO_ID } from "../../backend/src/domain/narrative/scenarios/policy-branch";
+import { ruleAdherence } from '../../backend/src/domain/simulation/rule-adherence';
 
 export const storyletNodes: Record<string, string> = {
   "triage-ssh-brute-force": "N-01", "block-external-source": "N-04",
@@ -51,9 +52,13 @@ export type BackendResult = {
   run: DurableRun;
   events: readonly AuditEvent[];
   ruleAdherence: number | null;
+  measurementError?: boolean;
 };
 export function backendResult(run: DurableRun | null, events: readonly AuditEvent[]): BackendResult | null {
   if (!run?.evaluation) return null;
-  return { run, events, ruleAdherence: run.evaluation.totalDecisions
-    ? 100 * run.evaluation.approvedDecisions / run.evaluation.totalDecisions : null };
+  try {
+    if (run.records.length !== run.evaluation.totalDecisions ||
+        run.records.filter(record => record.referee.approved).length !== run.evaluation.approvedDecisions) throw new Error('Missing decision evidence');
+    return { run, events, ruleAdherence: ruleAdherence(run.evaluation) };
+  } catch { return { run, events, ruleAdherence: null, measurementError: true }; }
 }

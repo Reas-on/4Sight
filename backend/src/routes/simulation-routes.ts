@@ -10,6 +10,7 @@ import { scenarioRegistry } from '../domain/narrative/scenarios/registry.js';
 import { graphMetadata } from '../domain/simulation/graph-projection.js';
 import { AiProviderError } from '../ai/errors.js';
 import { RequestBudget } from './request-budget.js';
+import { ruleAdherence } from '../domain/simulation/rule-adherence.js';
 import { CreateRunSchema, CreateRunValidationSchema, EmptyQuery, ErrorResponses, EvaluationSchema, IdParams, ModelListSchema, RunSchema, ScenarioListSchema } from './simulation-schemas.js';
 
 const loopback = (ip: string): boolean => ip === '::1' || ip.startsWith('127.') && isIP(ip) === 4 || ip.startsWith('::ffff:127.');
@@ -136,8 +137,7 @@ export async function simulationRoutes(app: FastifyInstance, options: Simulation
   }, async (request) => {
     const run = await repo.read(request.params.id);
     if (!run.evaluation) throw new ApplicationError('RESULT_NOT_READY', 409);
-    const count = run.evaluation.totalDecisions;
-    return { evaluation: run.evaluation, ruleAdherence: count === 0 ? null : run.evaluation.approvedDecisions * 100 / count };
+    return { evaluation: run.evaluation, ruleAdherence: ruleAdherence(run.evaluation) };
   });
 
   app.get<{ Params: { id: string }; Querystring: { after?: number } }>('/api/v1/runs/:id/events', {

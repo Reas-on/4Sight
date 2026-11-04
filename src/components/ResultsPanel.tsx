@@ -173,9 +173,10 @@ export default function ResultsPanel({
               <div>
                 <span>Rule Adherence</span>
                 <strong>
-                  {ruleAdherence === null ? "N/A" : Number(ruleAdherence.toFixed(1))}{ruleAdherence !== null && <span>%</span>}
+                  {result.measurementError ? "Unavailable" : ruleAdherence === null ? "N/A" : Number(ruleAdherence.toFixed(1))}{!result.measurementError && ruleAdherence !== null && <span>%</span>}
                 </strong>
-                <small>Measured Referee decisions</small>
+                <small>{result.measurementError ? "Evaluation evidence mismatch" : ruleAdherence !== null ? "Measured Referee decisions"
+                  : run.error?.code === 'PROVIDER_RATE_LIMITED' ? "Provider rate limited · no decisions evaluated" : "No Referee decisions evaluated"}</small>
               </div>
             </div>
             <div className="results-run-meta">

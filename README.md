@@ -100,6 +100,24 @@ Network loss remains frontend connectivity state; backend interruption retains
 the existing `PROCESS_INTERRUPTED / INCONCLUSIVE` recovery policy. Execution is
 sequential, including when several pending branches are visible.
 
+Live graph projection consumes committed SSE events without waiting for a REST
+snapshot after each event. Restored runs use the durable graph snapshot; live
+runs reconcile to it at terminal catch-up. Camera requests are keyed by run and
+step sequence and retained until their dynamic mesh is registered. Manual camera
+input and cancellation invalidate pending focus. Committed evidence and statuses
+are never delayed for presentation.
+
+New live nodes use a 360ms ease-out opacity/scale entrance (0.7 to 1), with their
+existing edge extending from parent to child and a one-time 8% parent emphasis.
+The shared renderer loop drives motion; replayed/restored nodes do not reanimate,
+reduced motion settles immediately, and large bursts may skip entrances.
+
+Rule Adherence uses one shared domain calculation for REST and Results:
+approved / evaluated × 100. Numeric zero remains 0%; zero evaluations is N/A;
+missing/inconsistent evidence is Unavailable. `PROVIDER_RATE_LIMITED` before a
+decision produces FAILED / INCONCLUSIVE with no invented Referee rejection or
+adherence. This provider condition can legitimately leave a scenario at its root.
+
 Focused backend acceptance:
 `PHASE4_DATABASE_TESTS=true npm --prefix backend test -- --fileParallelism=false src/application/simulation/tests/branch.test.ts src/application/simulation/tests/beginner.test.ts`.
 These tests create disposable databases. The beginner browser config also covers

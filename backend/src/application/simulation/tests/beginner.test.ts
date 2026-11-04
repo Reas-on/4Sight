@@ -53,8 +53,9 @@ describe.skipIf(process.env.PHASE4_DATABASE_TESTS !== 'true')('beginner real Pos
   let admin: Pool;
   let base: string;
   const database = `beginner_test_${randomUUID().replaceAll('-', '')}`;
-  let mode: 'valid' | 'reject' | 'invalid' = 'valid';
+  let mode: 'valid' | 'reject' | 'invalid' | 'rate-limited' = 'valid';
   const transport = vi.fn<typeof fetch>(async (_url, init) => {
+    if (mode === 'rate-limited') return Response.json({ error: { code: 429, message: 'Fixture quota exhausted' } }, { status: 429 });
     const request = JSON.parse(String(init?.body));
     const context = JSON.parse(request.contents[0].parts[0].text).backendContext;
     const internal = context.world.sourceClassification === 'internal';
@@ -97,6 +98,8 @@ describe.skipIf(process.env.PHASE4_DATABASE_TESTS !== 'true')('beginner real Pos
     const text = await stream.text();
     const events = text.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)) as AuditEvent);
     const snapshot = await (await fetch(`${base}/api/v1/runs/${run.id}`, { headers })).json() as DurableRun;
+    const result = await (await fetch(`${base}/api/v1/runs/${run.id}/result`, { headers })).json() as { ruleAdherence: number | null };
+    expect(result.ruleAdherence).toBe(snapshot.evaluation?.totalDecisions ? snapshot.evaluation.approvedDecisions * 100 / snapshot.evaluation.totalDecisions : null);
     expect(events.map(event => event.sequence)).toEqual(events.map((_, i) => i + 1));
     expect(events.at(-1)?.eventType).toBe('run.finished');
     expect(transport).toHaveBeenCalledTimes(1);
@@ -139,6 +142,14 @@ describe.skipIf(process.env.PHASE4_DATABASE_TESTS !== 'true')('beginner real Pos
     expect(snapshot).toMatchObject({ status: 'FAILED', error: { code: 'INVALID_AI_OUTPUT' }, records: [],
       evaluation: { outcome: 'INCONCLUSIVE' }, workflow: { proposal: null } });
     expect(snapshot.narrative.world.responseStatus).toBe('none');
+  });
+  it('keeps provider rate limiting distinct from policy rejection with zero measured decisions', async () => {
+    mode = 'rate-limited';
+    const { snapshot, path } = await execute('externalSource');
+    expect(path).toEqual(['N-01', 'N-02', 'N-03']);
+    expect(snapshot).toMatchObject({ status: 'FAILED', error: { code: 'PROVIDER_RATE_LIMITED', phase: 'provider' },
+      records: [], evaluation: { outcome: 'INCONCLUSIVE', totalDecisions: 0, policyViolations: [] } });
+    expect(snapshot.graph?.nodes.map(node => node.nodeId)).toEqual(['N-01', 'N-02', 'N-03', 'N-04']);
   });
   it('preserves the original executable scenario and its three-decision persistence contract', async () => {
     const response = await fetch(`${base}/api/v1/runs`, { method: 'POST', headers: { origin: 'http://localhost:5173', 'content-type': 'application/json' },

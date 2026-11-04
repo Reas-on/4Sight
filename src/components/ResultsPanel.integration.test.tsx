@@ -24,4 +24,14 @@ describe("backend Results Panel mapping", () => {
     expect(screen.getByText(/PROVIDER_TIMEOUT/)).toBeTruthy();
     expect(screen.queryByText("PASS")).toBeNull();
   });
+  it('explains genuine N/A for rate limits and reports missing evidence as unavailable', () => {
+    const run = { ...runFixture(undefined, 'FAILED'), error: { code: 'PROVIDER_RATE_LIMITED', message: 'Provider rate limited.', phase: 'provider' as const } };
+    const view = render(<ResultsPanel result={backendResult(run, [])} open onClose={() => undefined} onDismissFocus={() => undefined} />);
+    expect(screen.getByText('Provider rate limited · no decisions evaluated')).toBeTruthy();
+    view.unmount();
+    const completed = runFixture(undefined, 'COMPLETED');
+    render(<ResultsPanel result={backendResult({ ...completed, records: [] }, [])} open onClose={() => undefined} onDismissFocus={() => undefined} />);
+    expect(screen.getByText('Unavailable')).toBeTruthy();
+    expect(screen.getByText('Evaluation evidence mismatch')).toBeTruthy();
+  });
 });

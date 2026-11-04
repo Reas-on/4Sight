@@ -27,6 +27,41 @@ function setup() {
 }
 
 describe("shared graph camera controller", () => {
+  it('retains dynamic focus until registration and fences stale/cancelled/manual requests', () => {
+    const camera = new PerspectiveCamera(40, 1.5, 0.1, 200); camera.position.set(0, 0, 30);
+    const positions = new Map<string, Vector3>();
+    const controller = new GraphCameraController(camera, id => positions.get(id), () => 30, 9);
+    controller.syncExecution('run:4', 'N-04', true, false);
+    controller.update(0.1, 0, false, false);
+    expect(controller.executionFocusNode).toBeNull();
+    positions.set('N-04', new Vector3(5, 3, 2));
+    controller.update(0.7, 700, false, false);
+    expect(controller.executionFocusNode).toBe('N-04');
+    expect(controller.target.toArray()).toEqual([5, 3, 2]);
+    controller.syncExecution('run:5', 'N-05', true, false);
+    controller.syncExecution('run:5', null, false, false);
+    positions.set('N-05', new Vector3(8, 2, 1));
+    controller.update(0.7, 1400, false, false);
+    expect(controller.target.toArray()).toEqual([5, 3, 2]);
+    controller.syncExecution('run:6', 'N-06', true, false);
+    controller.panBy(0.01, 0.01);
+    const manual = controller.target.clone();
+    positions.set('N-06', new Vector3(10, 3, 0));
+    controller.update(0.7, 2100, false, false);
+    expect(controller.target.equals(manual)).toBe(true);
+    controller.syncExecution('run:7', 'N-06', true, false);
+    controller.update(0.7, 2800, false, false);
+    expect(controller.target.toArray()).toEqual([10, 3, 0]);
+  });
+  it('returns to overview when completion follows a committed no-active-node frame', () => {
+    const { controller, advance } = setup();
+    controller.syncExecution('run:3', 'N-03', true, false);
+    advance(0.7);
+    controller.syncExecution('run:3', null, true, false);
+    controller.syncExecution('run:3', null, false, true);
+    advance(1);
+    expect(controller.target.length()).toBeCloseTo(0);
+  });
   it('wheel pan respects orientation and distance without orbiting or resuming old focus', () => {
     const { camera, controller, advance } = setup();
     controller.dragBy(0.8, 0.4);

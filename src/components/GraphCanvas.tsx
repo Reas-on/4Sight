@@ -17,6 +17,7 @@ import {
 } from "./GraphCameraController";
 import type { OrbitKey } from "../hooks/useHoldShortcut";
 import { wheelGesture, wheelOrbitDelta, wheelPanDelta } from "./wheelOrbit";
+import { GraphRevealMotion } from './GraphRevealMotion';
 
 type DragMode = "orbit" | "pan";
 type DragPointer = { x: number; y: number; mode: DragMode; button: number };
@@ -31,6 +32,7 @@ export type GraphControls = {
 type Props = {
   dataset?: GraphDataset;
   graphIdentity?: string;
+  animateNodeIds?: readonly string[];
   selectedNodeId: string | null;
   hoveredNodeId: string | null;
   focusedNodeId: string | null;
@@ -113,6 +115,8 @@ const GraphCanvas = memo(
       const group = new THREE.Group();
       scene.add(group);
       const sphereGeometry = new THREE.SphereGeometry(1, 12, 10);
+      const revealMotion = new GraphRevealMotion();
+      revealMotion.register(latest.current.graphIdentity ?? '', graph.nodes, [], performance.now(), latest.current.reducedMotion);
       const makeMesh = (node: GraphDataset['nodes'][number], i: number) => {
         const material = new THREE.MeshBasicMaterial({
           color: node.kind === "workflow" ? 0xa0d0da : 0x7799a5,
@@ -125,7 +129,7 @@ const GraphCanvas = memo(
           node.kind === "workflow" ? 0.145 : 0.038 + (i % 4) * 0.007;
         mesh.position.set(...node.position);
         mesh.scale.setScalar(radius);
-        mesh.userData = { id: node.id, radius, index: i };
+        mesh.userData = { id: node.id, radius, index: i, baseOpacity: 0, baseScale: radius };
         group.add(mesh);
         return mesh;
       };
@@ -233,6 +237,7 @@ const GraphCanvas = memo(
         graphRadius,
       );
       syncDataset.current = (next) => {
+        revealMotion.register(latest.current.graphIdentity ?? '', next.nodes, latest.current.animateNodeIds ?? [], performance.now(), latest.current.reducedMotion);
         if (next === graph) return;
         const ids = new Set(next.nodes.map(node => node.id));
         for (const [id, mesh] of meshes) if (!ids.has(id)) { group.remove(mesh); mesh.material.dispose(); meshes.delete(id); }
@@ -510,8 +515,12 @@ const GraphCanvas = memo(
         previousTime = now;
         if (hidden || !latest.current.visible) return;
         const state = latest.current;
+        // React effects and requestAnimationFrame are independently scheduled.
+        // Register the current topology before resolving this frame's focus.
+        syncDataset.current(state.dataset ?? legacyGraph);
         const elapsed = now - state.introStartedAt;
         const blend = 1 - Math.exp(-dt * 7);
+        const motion = new Map(graph.nodes.map(node => [node.id, revealMotion.sample(node.id, now, state.reducedMotion)]));
         if (state.isImmersive !== previousImmersive) {
           const fit = fitDistance();
           cameraController.reframe(fit / previousFit);
@@ -544,6 +553,15 @@ const GraphCanvas = memo(
             (!cameraController.isTransitioning &&
               now - executionStarted >= EXECUTION_FOCUS_SECONDS * 1000));
         container.dataset.executionNode = executionNode ?? "";
+        container.dataset.focusNode = cameraController.executionFocusNode ?? '';
+        container.dataset.cameraTarget = cameraController.target.toArray().map(value => value.toFixed(3)).join(',');
+        container.dataset.cameraPosition = camera.position.toArray().map(value => value.toFixed(3)).join(',');
+        container.dataset.eventSequence = state.executionIdentity ?? '';
+        container.dataset.nodeCount = String(graph.nodes.length);
+        container.dataset.edgeCount = String(graph.edges.length);
+        container.dataset.revealCount = String(revealMotion.count);
+        container.dataset.revealingNodes = [...motion].filter(([, value]) => value.progress < 1).map(([id]) => id).join(',');
+        container.dataset.revealingEdges = graph.edges.filter(edge => motion.get(edge.target)!.edge < 1).map(edge => `${edge.source}>${edge.target}`).join(',');
         container.dataset.executionPhase = executionNode
           ? processing
             ? "processing"
@@ -587,7 +605,9 @@ const GraphCanvas = memo(
                   : executionNode
                     ? 0.3
                     : 0.19);
-          mesh.material.opacity += (alpha - mesh.material.opacity) * blend;
+          const entrance = motion.get(node.id)!;
+          mesh.userData.baseOpacity += (alpha - mesh.userData.baseOpacity) * blend;
+          mesh.material.opacity = mesh.userData.baseOpacity * entrance.opacity;
           materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses, graph));
           const selected =
             executionNode === node.id || state.selectedNodeId === node.id;
@@ -604,10 +624,23 @@ const GraphCanvas = memo(
           mesh.material.color.lerp(materialColor, blend);
           const scale =
             mesh.userData.radius * (selected ? 1.22 : hovered ? 1.12 : 1);
-          mesh.scale.lerp(targetScale.setScalar(scale), blend);
+          mesh.userData.baseScale += (scale - mesh.userData.baseScale) * blend;
+          mesh.scale.copy(targetScale.setScalar(mesh.userData.baseScale * entrance.scale * (1 + 0.08 * entrance.emphasis)));
         });
         lines.forEach((line, i) => {
           const edge = graph.edges[i];
+          const progress = motion.get(edge.target)!.edge;
+          const source = meshes.get(edge.source)!.position;
+          const target = meshes.get(edge.target)!.position;
+          const endpoint = line.geometry.getAttribute('position');
+          // Two existing vertices: grow from parent to child, with no new
+          // geometry allocation and no competing render/animation loop.
+          if (line.userData.progress !== progress) {
+            endpoint.setXYZ(1, source.x + (target.x - source.x) * progress,
+              source.y + (target.y - source.y) * progress, source.z + (target.z - source.z) * progress);
+            endpoint.needsUpdate = true; line.userData.progress = progress;
+            line.geometry.computeBoundingSphere();
+          }
           line.visible = state.showContext || edge.kind === "workflow";
           const related = edge.source === active || edge.target === active;
           const reveal = skipIntro
@@ -621,7 +654,7 @@ const GraphCanvas = memo(
             edge.source === state.hoveredNodeId ||
             edge.target === state.hoveredNodeId;
           const alpha =
-            reveal *
+            reveal * progress *
             (active
               ? related
                 ? 0.58
@@ -674,10 +707,15 @@ const GraphCanvas = memo(
           projected.project(camera);
           const related =
             !active || active === label.id || connected?.has(label.id);
+          const entrance = motion.get(label.id)!;
+          label.element.dataset.entranceProgress = entrance.progress.toFixed(3);
+          label.element.dataset.edgeProgress = entrance.edge.toFixed(3);
+          label.element.dataset.nodeScale = entrance.scale.toFixed(3);
+          label.element.dataset.parentId = graph.nodeById.get(label.id)?.parentId ?? '';
           label.element.style.transform = `translate(${(projected.x * 0.5 + 0.5) * width + 13}px, ${(-projected.y * 0.5 + 0.5) * height - 13}px)`;
           label.element.style.opacity = String(
             projected.z < 1 && projected.z > -1
-              ? formation * (related ? 1 : 0.35)
+              ? formation * entrance.opacity * (related ? 1 : 0.35)
               : 0,
           );
           label.element.dataset.active = String(active === label.id);
