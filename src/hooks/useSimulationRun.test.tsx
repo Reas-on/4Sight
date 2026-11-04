@@ -28,6 +28,24 @@ function harness(initial = runFixture()) {
 beforeEach(() => sessionStorage.clear());
 afterEach(cleanup);
 describe("authoritative frontend run integration", () => {
+  it('blocks presentation switching for active/paused runs and detaches completed runs without backend cancellation', async () => {
+    const h = harness();
+    const { result } = renderHook(() => useSimulationRun(input, null, h.api, h.consume));
+    act(() => result.current.run());
+    await waitFor(() => expect(h.callbacks).toHaveLength(1));
+    act(() => expect(result.current.clearPresentation()).toBe(false));
+    act(() => result.current.pause());
+    await waitFor(() => expect(result.current.snapshot?.status).toBe('PAUSED'));
+    act(() => expect(result.current.clearPresentation()).toBe(false));
+    act(() => result.current.stop());
+    await waitFor(() => expect(result.current.snapshot?.status).toBe('CANCELLED'));
+    const calls = vi.mocked(h.api.control).mock.calls.length;
+    act(() => expect(result.current.clearPresentation()).toBe(true));
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.events).toEqual([]);
+    expect(result.current.runId).toBeNull();
+    expect(h.api.control).toHaveBeenCalledTimes(calls);
+  });
   it("creates one backend run and drives node/results from persisted evidence, not timers", async () => {
     const h = harness();
     const { result } = renderHook(() => useSimulationRun(input, null, h.api, h.consume));

@@ -141,6 +141,7 @@ const StoryletDefinitionSchema = Type.Object(
     id: Type.String({ pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }),
     description: Type.String({ minLength: 1, maxLength: 4000 }),
     graphNodeId: Type.Optional(Type.String({ minLength: 1 })),
+    rejectionOutcomeId: Type.Optional(Type.Literal('response-rejected')),
     priority: Type.Integer({ minimum: -1000, maximum: 1000 }),
     oneShot: Type.Boolean(),
     terminal: Type.Boolean(),
@@ -240,6 +241,9 @@ export function validateScenarioDefinition(value: unknown): ScenarioDefinition {
       );
     }
     storyletIds.add(storylet.id);
+    if (storylet.rejectionOutcomeId && !storylet.outcomes.some(outcome => outcome.id === storylet.rejectionOutcomeId)) {
+      throw new NarrativeValidationError('Rejection outcome must exist in the storylet');
+    }
 
     assertConditionReferences(
       storylet.preconditions,

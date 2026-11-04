@@ -6,6 +6,9 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { buildApp } from '../src/app.js';
 import { loadEnv } from '../src/config/env.js';
 import { GeminiDecisionProvider } from '../src/ai/providers/gemini.js';
+import { BRANCH_SCENARIO_ID } from '../src/domain/narrative/scenarios/policy-branch.js';
+import { createBranchFixtureProvider } from '../src/domain/simulation/fixtures.js';
+import { setTimeout } from 'node:timers/promises';
 
 if (process.env.BEGINNER_TEST_SERVER !== 'true') throw new Error('Explicit BEGINNER_TEST_SERVER=true required');
 const env = loadEnv();
@@ -19,7 +22,10 @@ finally { await pool.end(); }
 const app = buildApp({
   env: { ...env, DATABASE_URL: url.href, HOST: '127.0.0.1', PORT: 3101, LOG_LEVEL: 'silent', SIMULATION_MODE: 'ai',
     SIMULATION_ALLOWED_ORIGIN: 'http://127.0.0.1:4173' },
-  simulationProviderFactory: () => new GeminiDecisionProvider({ apiKey: 'test-only-key', model: 'gemini-2.5-flash', requestTimeoutMs: 1000, maxRetries: 0 }, {
+  simulationProviderFactory: (_variant, scenarioId) => scenarioId === BRANCH_SCENARIO_ID
+    ? { ...createBranchFixtureProvider(), id: 'gemini', provenance: { provider: 'gemini', model: 'gemini-2.5-flash' },
+      decide: async context => { await setTimeout(80, undefined, { signal: context.signal }); return createBranchFixtureProvider().decide(context); } }
+    : new GeminiDecisionProvider({ apiKey: 'test-only-key', model: 'gemini-2.5-flash', requestTimeoutMs: 1000, maxRetries: 0 }, {
     fetch: async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       const context = JSON.parse(body.contents[0].parts[0].text).backendContext;

@@ -3,12 +3,11 @@ import { isDeepStrictEqual } from 'node:util';
 import { and, asc, eq, gt } from 'drizzle-orm';
 import * as tables from '../../db/schema.js';
 import { advanceNarrative, initializeScenario, resolveNextStorylet } from '../../domain/narrative/engine.js';
-import { beginnerContext, beginnerInitialStates, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
+import { beginnerContext, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
 import { evaluateDecision } from '../../domain/referee/evaluator.js';
 import type { TransitionRecord } from '../../domain/narrative/types.js';
 import type { ProposedDecision } from '../../domain/referee/types.js';
 import { redact } from '../../ai/prompt.js';
-import { sshBruteForceInitialStates } from '../../domain/narrative/scenarios/ssh-brute-force.js';
 import { validateNarrativeState } from '../../domain/narrative/schemas.js';
 import { DEFAULT_REFEREE_POLICY_SET } from '../../domain/referee/policies.js';
 import { validateProposedDecision } from '../../domain/referee/schemas.js';
@@ -18,6 +17,8 @@ import { evaluateSimulationStep } from '../../domain/simulation/step.js';
 import type { SimulationEvaluationOutcome, SimulationStatus } from '../../domain/simulation/types.js';
 import { ApplicationError, type AuditEvent, type DurableRun, type RunConfiguration, type SimulationRepository } from '../../application/simulation/contracts.js';
 import { TransactionManager, type Transaction } from './transaction-manager.js';
+import { scenarioRegistry } from '../../domain/narrative/scenarios/registry.js';
+import { graphMetadata, graphReveals, projectGraph } from '../../domain/simulation/graph-projection.js';
 
 type RunRow = typeof tables.simulationRuns.$inferSelect;
 const tokenHash = (value: string): string => createHash('sha256').update(value).digest('hex');
@@ -40,8 +41,9 @@ export class PostgresSimulationRepository implements SimulationRepository {
     const records = await tx.select().from(tables.simulationDecisions)
       .where(eq(tables.simulationDecisions.runId, row.id)).orderBy(asc(tables.simulationDecisions.stepSequence));
     const [evaluation] = await tx.select().from(tables.simulationEvaluations).where(eq(tables.simulationEvaluations.runId, row.id));
-    const workflowEvents = isBeginner(row.configuration.scenario) ? await tx.select().from(tables.simulationEvents)
-      .where(eq(tables.simulationEvents.runId, row.id)).orderBy(asc(tables.simulationEvents.sequence)) : null;
+    const allEvents = await tx.select().from(tables.simulationEvents)
+      .where(eq(tables.simulationEvents.runId, row.id)).orderBy(asc(tables.simulationEvents.sequence));
+    const workflowEvents = isBeginner(row.configuration.scenario) ? allEvents : null;
     const workflow = workflowEvents ? {
       proposal: (workflowEvents.find(event => event.eventType === 'decision.proposed')?.payload.proposal ?? null) as ProposedDecision | null,
       transitions: workflowEvents.filter(event => event.eventType === 'transition.committed').map(event => event.payload.transition as TransitionRecord),
@@ -65,12 +67,22 @@ export class PostgresSimulationRepository implements SimulationRepository {
       }
       if (!isDeepStrictEqual(replay, snapshot.narrative)) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
     }
+    if (row.configuration.scenario.storylets.some(storylet => storylet.rejectionOutcomeId)) {
+      let replay = initializeScenario(row.configuration.scenario, snapshot.narrative.initialWorld);
+      for (const { record } of records) {
+        const verified = evaluateSimulationStep(record.decision, replay, row.configuration.scenario,
+          DEFAULT_REFEREE_POLICY_SET, record.sequence, record.recordedAt);
+        if (verified.error || !isDeepStrictEqual(verified.record, record)) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+        replay = verified.state;
+      }
+      if (!isDeepStrictEqual(replay, snapshot.narrative)) throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
+    }
     if (!finalizing && isTerminalStatus(row.status) !== Boolean(evaluation)) {
       throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
     }
     if (snapshot.narrative.version !== row.currentStateVersion || snapshot.narrative.step !== row.currentStep ||
         snapshot.narrative.scenarioId !== row.scenarioId || records.some((item, index) => item.stepSequence !== index + 1) ||
-        (workflow ? workflow.transitions.length : records.filter((item) => item.record.transition !== null).length) !== row.currentStateVersion ||
+        (workflow ? workflow.transitions.length : records.filter((item) => item.record.transition !== null || item.record.rejectionTransition).length) !== row.currentStateVersion ||
         evaluation && (evaluation.evaluation.status !== row.status || evaluation.evaluation.finalStateVersion !== row.currentStateVersion)) {
       throw new ApplicationError('PERSISTED_EVIDENCE_MISMATCH', 500);
     }
@@ -95,6 +107,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       error: row.failure, createdAt: row.createdAt, startedAt: row.startedAt,
       completedAt: row.completedAt, updatedAt: row.updatedAt,
       ...(workflow ? { workflow } : {}),
+      graph: projectGraph(graphMetadata(row.configuration.scenario, snapshot.narrative.initialWorld).root, allEvents),
     };
   }
 
@@ -136,9 +149,9 @@ export class PostgresSimulationRepository implements SimulationRepository {
 
   create(configuration: RunConfiguration, token: string): Promise<DurableRun> {
     return this.transactions.transaction(async (tx) => {
-      const narrative = initializeScenario(configuration.scenario, isBeginner(configuration.scenario)
-        ? beginnerInitialStates[configuration.initialVariant] : configuration.initialVariant === 'externalSource'
-          ? sshBruteForceInitialStates.externalSource : sshBruteForceInitialStates.protectedInternalSource);
+      const initial = scenarioRegistry.find(entry => entry.scenario.id === configuration.scenario.id)?.initialStates[configuration.initialVariant];
+      if (!initial) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
+      const narrative = initializeScenario(configuration.scenario, initial);
       const id = randomUUID();
       const [row] = await tx.insert(tables.simulationRuns).values({
         id, accessHash: tokenHash(token), scenarioId: configuration.scenario.id,
@@ -148,6 +161,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       if (!row) throw new ApplicationError('RUN_CREATE_FAILED', 500);
       await tx.insert(tables.simulationSnapshots).values({ id: randomUUID(), runId: id, stateVersion: 0, narrative });
       await this.append(tx, row, 'run.created', { status: 'CREATED' });
+      await this.append(tx, row, 'graph.revealed', { nodes: [graphMetadata(configuration.scenario, initial).root] });
       await this.saveRow(tx, row);
       return this.hydrate(tx, await this.row(tx, id));
     });
@@ -192,6 +206,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       }
       const run = await this.hydrate(tx, row);
       const proposed = validateProposedDecision(decision);
+      const selected = resolveNextStorylet(run.narrative, row.configuration.scenario);
       const decisionId = `run-${id}-step-${run.records.length + 1}`;
       const result = evaluateSimulationStep({ ...proposed, providerId: row.providerId, decisionId }, run.narrative, row.configuration.scenario,
         DEFAULT_REFEREE_POLICY_SET, run.records.length + 1, new Date().toISOString());
@@ -209,20 +224,27 @@ export class PostgresSimulationRepository implements SimulationRepository {
       await this.append(tx, row, 'decision.evaluated', {
         decisionSequence: record.sequence, verdict: record.referee.verdict,
         violatedPolicyIds: record.referee.violatedPolicies.map((policy) => policy.policyId),
-      }, record.decision.storyletId, record.transition?.graphNodeId ?? null);
-      if (record.transition) {
+      }, selected.status === 'eligible' ? selected.storylet.id : record.decision.storyletId,
+        selected.status === 'eligible' ? selected.storylet.graphNodeId ?? selected.storylet.id : null);
+      const committedTransition = record.transition ?? record.rejectionTransition;
+      if (committedTransition) {
         await tx.insert(tables.simulationSnapshots).values({ id: randomUUID(), runId: id,
           stateVersion: result.state.version, narrative: result.state });
         row.currentStateVersion = result.state.version;
         row.currentStep = result.state.step;
-        await this.append(tx, row, 'transition.committed', { transition: record.transition },
-          record.transition.storyletId, record.transition.graphNodeId ?? null);
+        await this.append(tx, row, 'transition.committed', { transition: committedTransition },
+          committedTransition.storyletId, committedTransition.graphNodeId ?? null);
+        await this.append(tx, row, 'graph.revealed', { nodes: graphReveals(row.configuration.scenario, result.state,
+          committedTransition.graphNodeId ?? committedTransition.storyletId) });
       }
-      if (!record.referee.approved) await this.finish(tx, row, 'COMPLETED', 'FAIL', 'POLICY_REJECTION');
+      if (!record.referee.approved && !record.rejectionTransition) await this.finish(tx, row, 'COMPLETED', 'FAIL', 'POLICY_REJECTION');
       else if (result.error) {
         row.failure = { code: result.error.code, message: 'Narrative transition failed.', phase: 'narrative' };
         await this.finish(tx, row, 'FAILED', 'INCONCLUSIVE', 'NARRATIVE_ERROR');
-      } else if (result.state.terminal) await this.finish(tx, row, 'COMPLETED', 'PASS', 'RUN_COMPLETED');
+      } else if (result.state.terminal) {
+        const rejected = !record.referee.approved || run.records.some(item => !item.referee.approved);
+        await this.finish(tx, row, 'COMPLETED', rejected ? 'FAIL' : 'PASS', rejected ? 'POLICY_REJECTION' : 'RUN_COMPLETED');
+      }
       await this.saveRow(tx, row);
       return this.hydrate(tx, await this.row(tx, id));
     });
@@ -283,6 +305,7 @@ export class PostgresSimulationRepository implements SimulationRepository {
       row.currentStateVersion = applied.state.version;
       row.currentStep = applied.state.step;
       await this.append(tx, row, 'transition.committed', { transition: applied.record }, storylet.id, storylet.graphNodeId ?? null);
+      await this.append(tx, row, 'graph.revealed', { nodes: graphReveals(row.configuration.scenario, applied.state, storylet.graphNodeId ?? storylet.id) });
       if (applied.state.terminal) {
         const rejected = run.records.some(record => !record.referee.approved);
         await this.finish(tx, row, 'COMPLETED', rejected ? 'FAIL' : 'PASS', rejected ? 'POLICY_REJECTION' : 'RUN_COMPLETED');

@@ -45,9 +45,9 @@ edges are retained, including `N-09` results and `N-10` rejection review.
   effect. Both routes reach `N-08 → N-09`. A rejection finishes **FAIL**, even
   though the walkthrough reaches its terminal node. Approved escalation means
   referred for SOC review, not a claim that an analyst resolved the incident.
-- Ordered committed SSE events are paced for presentation through the existing
+- Ordered committed SSE events reveal the executed path through the existing
   camera controller. The backend never waits for animation. Fast intermediate
-  steps stay visible; unselected branches are marked Skipped. The Inspector
+  steps remain in the graph and audit; the Inspector
   follows the active node and retains proposal, bounded public model explanation
   (supporting information only), verdict and actual policy messages for later
   inspection. Results show eight executed nodes and one Referee decision.
@@ -60,7 +60,7 @@ Focused verification (no paid inference):
 ```sh
 npm --prefix backend run api:contract
 PHASE4_DATABASE_TESTS=true npm --prefix backend test -- src/application/simulation/tests/beginner.test.ts
-npm test -- src/hooks/useWorkflowPresentation.test.tsx
+npm test -- src/data/dynamicGraph.test.ts src/hooks/useSimulationRun.test.tsx
 npx playwright test --config playwright.beginner.config.ts
 ```
 
@@ -69,10 +69,47 @@ databases afterward. The browser harness uses ports `3101`/`4173` and mocked Gem
 transport; the live `3001`/`5173` services stay available. NixOS browser runtime
 requirements are the same as the Phase 5 acceptance tests.
 
+## Dynamic scenario graphs and rejection branches
+
+New workspaces show **Choose scenario**. Confirming a supported scenario loads
+backend entry metadata and displays exactly one root, without starting a run.
+Selection is locked while a run is created, running or paused; finish or cancel
+before switching. Preview-only imports display a single non-executable preview
+node and never substitute a built-in scenario.
+
+`graph.revealed` events are committed in the existing PostgreSQL transaction with
+narrative transitions. Run snapshots project these events into stable
+`nodeId`/`storyletId`/`parentNodeId` topology with a monotonic event sequence. The
+frontend reconciles the snapshot and newer SSE events idempotently. No graph
+table or migration is needed. Refresh restores the saved run; selecting a new
+scenario clears only its presentation and leaves persisted run history intact.
+The canvas reconciles nodes/edges without replacing its renderer or camera.
+
+**Policy Rejection — Alternative Responses** (`policy-rejection-branches`) runs
+sequentially: `N-01` triage → `N-02` proposed internal block → `N-03` independent
+SOC escalation → one follow-up. Existing Referee policies genuinely reject the
+block. Its approved effects stay unapplied (`transition: null`); a separate
+`rejectionTransition` records only the scenario's `response-rejected` routing
+outcome. Rejection reveals `N-04` accept review and `N-05` decline review as
+pending. Narrative conditions select one, and the other is visibly skipped.
+The protected variant accepts review; the other internal-source fixture declines.
+Both finish **COMPLETED / FAIL**, retaining the policy violation. Real Gemini
+still uses the configured adapter; deterministic acceptance uses fixtures.
+
+Network loss remains frontend connectivity state; backend interruption retains
+the existing `PROCESS_INTERRUPTED / INCONCLUSIVE` recovery policy. Execution is
+sequential, including when several pending branches are visible.
+
+Focused backend acceptance:
+`PHASE4_DATABASE_TESTS=true npm --prefix backend test -- --fileParallelism=false src/application/simulation/tests/branch.test.ts src/application/simulation/tests/beginner.test.ts`.
+These tests create disposable databases. The beginner browser config also covers
+dynamic branching, retry, loading races, preview-only imports and wheel gestures.
+
 ## Controls
 
-- Drag or two-finger scroll to orbit (horizontal = yaw, vertical = pitch; diagonal = both). A mouse wheel also rotates. Both axes support repeated complete revolutions through the poles, using a normalized camera-frame quaternion. Use the +/− buttons, Ctrl+scroll, or touch pinch to zoom; right-drag/two-finger touch drag to pan. Focus/click the graph, then hold arrow keys for horizontal/vertical orbit.
+- Drag or two-finger scroll to orbit (horizontal = yaw, vertical = pitch; diagonal = both). A mouse wheel also rotates. Both axes support repeated complete revolutions through the poles, using a normalized camera-frame quaternion. Use the +/− buttons or pinch to zoom; right-drag/two-finger touch drag to pan. Focus/click the graph, then hold arrow keys for horizontal/vertical orbit.
 - Hold **Ctrl while left-dragging** the canvas to pan the workspace. The drag mode is latched at pointer-down, so releasing Ctrl mid-drag does not switch back to orbit. Center restores the canonical framing.
+- Hold **Ctrl while two-finger scrolling** over the canvas to pan in the camera plane. Normalized horizontal/vertical deltas respect camera orientation and distance. Physical Control key state distinguishes this from synthesized Ctrl-wheel pinch zoom; scrolling outside the canvas retains browser behavior. Synthetic tests do not constitute physical trackpad verification.
 - Click a node to select it. Click empty graph space or the details × to clear selection. Connected-node links smoothly navigate the camera; dragging interrupts navigation or centering.
 - Scenario Source opens a preview/confirm Explorer. Browse backend-supported SSH Brute Force variants or preview-only reference material, filter by MITRE technique, or import JSON/YAML/YML/TXT/LOG files up to 256 KiB. Source material and optional **Additional Context** are independent session-local inputs; changing either preserves the other.
 - The Explorer uses a fixed viewport-bounded shell: desktop has a 40/60 source/preview layout with separate scroll regions; narrow screens switch between Browse sources and Preview source while keeping header/tabs/actions visible. JSON is formatted for display without modifying the imported raw source.
@@ -82,11 +119,12 @@ requirements are the same as the Phase 5 acceptance tests.
 - The **Settings gear is in the top-right application header beside the profile icon**, with a 40×40 hit area. Settings → Graph Preferences contains Context relationships, retaining the same session-local metadata visibility setting. The application header (including Settings) is hidden during immersive mode and returns on exit.
 - Expand control or hold Space **0.8 seconds** to toggle immersive mode. Escape exits.
 - **Ctrl + Space** starts/resumes or cancels the backend run, and toggles saved Results after a terminal outcome. The sidebar retains Pause/Resume. Retry cancels any active predecessor and creates a new run UUID with the current selection. Existing immersive controls, geometry, keyboard priorities and camera interruption behavior are preserved. Plain Space never starts simulation; Enter/click do. OS/input-method interception of Ctrl+Space cannot be overridden; use the visible control if unavailable.
+- **R** invokes the same Retry handler when valid, resetting presentation to the new run's root. Typing fields, editable content, key-repeat and Ctrl/Alt/Meta combinations are ignored; in-flight requests are guarded against duplicate creation.
 - Immersive mode hides the cursor. Two short Space presses within 350ms toggle cursor visibility; pointer interactions remain available. Focused controls/dialogs retain native keyboard behavior.
 - Sound defaults ON and preserves an explicit saved mute. One AudioContext mixes intro, continuous filtered drone/noise ambience with slow stereo movement, deliberate selection/navigation cues, and committed demo transition/completion cues. Master mute fades ambience and suspends processing; unmute fades it back in. Hidden pages also suspend processing. Browser autoplay may require a click, touch, or key gesture; late permission starts ambience without replaying the intro. Reduced motion suppresses sound. Development logs use the `[4Sight audio]` prefix.
 - Left and right drawers preserve their state across immersive mode.
-- Graph and Steps switch between 3D relationships and the illustrative workflow.
-- Terminal backend runs open Results automatically. Counts, verdicts, provenance, rule adherence and audit evidence come from persisted backend data. Hallucination Rate is `N/A`; no measurement exists. Only executed graph nodes pass; `N-02`/`N-03` are contextual/skipped. Close/reopen preserves results; SOAR export stays unavailable.
+- Graph and Steps switch between the revealed 3D topology and its workflow steps.
+- Terminal backend runs open Results automatically. Counts, verdicts, provenance, rule adherence and audit evidence come from persisted backend data. Hallucination Rate is `N/A`; no measurement exists. Policy rejection and infrastructure failure are distinct. Audit typography is 20% larger with wrapping evidence. Close/reopen preserves results; SOAR export stays unavailable.
 
 Audio cues follow committed backend events, including failure and Referee interception; they never decide execution outcomes.
 

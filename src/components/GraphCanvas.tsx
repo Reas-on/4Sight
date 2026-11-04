@@ -16,7 +16,7 @@ import {
   GraphCameraController,
 } from "./GraphCameraController";
 import type { OrbitKey } from "../hooks/useHoldShortcut";
-import { wheelOrbitDelta } from "./wheelOrbit";
+import { wheelGesture, wheelOrbitDelta, wheelPanDelta } from "./wheelOrbit";
 
 type DragMode = "orbit" | "pan";
 type DragPointer = { x: number; y: number; mode: DragMode; button: number };
@@ -30,6 +30,7 @@ export type GraphControls = {
 };
 type Props = {
   dataset?: GraphDataset;
+  graphIdentity?: string;
   selectedNodeId: string | null;
   hoveredNodeId: string | null;
   focusedNodeId: string | null;
@@ -66,6 +67,7 @@ const GraphCanvas = memo(
       focus: () => {},
     });
     const [error, setError] = useState(false);
+    const syncDataset = useRef<(dataset: GraphDataset) => void>(() => {});
     useImperativeHandle(
       ref,
       () => ({
@@ -79,8 +81,8 @@ const GraphCanvas = memo(
     );
 
     useEffect(() => {
-      const graph = dataset;
-      const { neighbors, steps } = dataset;
+      let graph = dataset;
+      let { neighbors, steps } = dataset;
       const container = host.current!;
       let renderer: THREE.WebGLRenderer;
       try {
@@ -98,7 +100,7 @@ const GraphCanvas = memo(
       renderer.setClearColor(0x101318, 0);
       renderer.domElement.setAttribute(
         "aria-label",
-        "Interactive 3D playbook graph. Drag, scroll, or use arrow keys to orbit. Use zoom buttons, touch pinch, or Ctrl+scroll to zoom. Click empty space to clear selection.",
+        "Interactive 3D playbook graph. Drag, scroll, or use arrow keys to orbit. Control plus drag or scroll to pan. Use zoom buttons or pinch to zoom. Click empty space to clear selection.",
       );
       renderer.domElement.setAttribute("role", "region");
       renderer.domElement.tabIndex = 0;
@@ -111,7 +113,7 @@ const GraphCanvas = memo(
       const group = new THREE.Group();
       scene.add(group);
       const sphereGeometry = new THREE.SphereGeometry(1, 12, 10);
-      const nodes = graph.nodes.map((node, i) => {
+      const makeMesh = (node: GraphDataset['nodes'][number], i: number) => {
         const material = new THREE.MeshBasicMaterial({
           color: node.kind === "workflow" ? 0xa0d0da : 0x7799a5,
           transparent: true,
@@ -126,11 +128,12 @@ const GraphCanvas = memo(
         mesh.userData = { id: node.id, radius, index: i };
         group.add(mesh);
         return mesh;
-      });
+      };
+      let nodes = graph.nodes.map(makeMesh);
       const meshes = new Map(
         nodes.map((mesh) => [mesh.userData.id as string, mesh]),
       );
-      const lines = graph.edges.map((edge) => {
+      const makeLine = (edge: GraphDataset['edges'][number]) => {
         const geometry = new THREE.BufferGeometry().setFromPoints([
           meshes.get(edge.source)!.position,
           meshes.get(edge.target)!.position,
@@ -144,7 +147,8 @@ const GraphCanvas = memo(
         const line = new THREE.Line(geometry, material);
         group.add(line);
         return line;
-      });
+      };
+      let lines = graph.edges.map(makeLine);
       const ringGeometry = new THREE.RingGeometry(0.23, 0.25, 40);
       const ringMaterial = new THREE.MeshBasicMaterial({
         color: 0xa7cdd6,
@@ -188,9 +192,7 @@ const GraphCanvas = memo(
       const materialColor = new THREE.Color();
       const targetScale = new THREE.Vector3();
 
-      const labels = graph.nodes
-        .filter((n) => n.kind === "workflow")
-        .map((node) => {
+      const makeLabel = (node: GraphDataset['nodes'][number]) => {
           const label = document.createElement("div");
           label.className = "graph-label";
           const dot = document.createElement("span");
@@ -201,8 +203,9 @@ const GraphCanvas = memo(
           id.textContent = node.id;
           label.append(dot, name, id);
           labelHost.current!.append(label);
-          return { element: label, status: id, mesh: meshes.get(node.id)!, id: node.id };
-        });
+          return { element: label, name, status: id, mesh: meshes.get(node.id)!, id: node.id };
+        };
+      let labels = graph.nodes.filter(n => n.kind === 'workflow').map(makeLabel);
 
       let width = 1;
       let height = 1;
@@ -212,12 +215,13 @@ const GraphCanvas = memo(
       let lastHover: string | null = null;
       let previousImmersive = latest.current.isImmersive;
       const fitDistance = () =>
-        (9 /
+        (Math.max(4, graphRadius + 1) /
           Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) /
           Math.min(1, camera.aspect)) *
         (latest.current.isImmersive ? 0.91 : 1.04);
-      const graphRadius =
+      let graphRadius =
         Math.max(
+          0,
           ...graph.nodes.map((node) =>
             new THREE.Vector3(...node.position).length(),
           ),
@@ -228,6 +232,31 @@ const GraphCanvas = memo(
         fitDistance,
         graphRadius,
       );
+      syncDataset.current = (next) => {
+        if (next === graph) return;
+        const ids = new Set(next.nodes.map(node => node.id));
+        for (const [id, mesh] of meshes) if (!ids.has(id)) { group.remove(mesh); mesh.material.dispose(); meshes.delete(id); }
+        for (const label of labels) if (!ids.has(label.id)) label.element.remove();
+        labels = labels.filter(label => ids.has(label.id));
+        nodes = next.nodes.map((node, i) => {
+          let mesh = meshes.get(node.id);
+          if (!mesh) { mesh = makeMesh(node, i); meshes.set(node.id, mesh); }
+          mesh.position.set(...node.position);
+          if (node.kind === 'workflow' && !labels.some(label => label.id === node.id)) labels.push(makeLabel(node));
+          const label = labels.find(label => label.id === node.id);
+          if (label) label.name.textContent = node.name;
+          return mesh;
+        });
+        const edgeKey = (edge: GraphDataset['edges'][number]) => `${edge.kind}:${edge.source}:${edge.target}`;
+        const existing = new Map(graph.edges.map((edge, index) => [edgeKey(edge), lines[index]]));
+        const nextKeys = new Set(next.edges.map(edgeKey));
+        for (const [key, line] of existing) if (!nextKeys.has(key)) { group.remove(line); line.geometry.dispose(); line.material.dispose(); }
+        lines = next.edges.map(edge => existing.get(edgeKey(edge)) ?? makeLine(edge));
+        graph = next; neighbors = next.neighbors; steps = next.steps;
+        graphRadius = Math.max(0, ...next.nodes.map(node => new THREE.Vector3(...node.position).length())) + 0.3;
+        cameraController.setGraphRadius(graphRadius);
+        previousFit = fitDistance();
+      };
       const resize = () => {
         const rect = container.getBoundingClientRect();
         width = Math.max(1, rect.width);
@@ -369,6 +398,10 @@ const GraphCanvas = memo(
       const controlEnd = () => {
         cameraController.endManualControl();
       };
+      let controlPressed = false;
+      const controlKey = (event: KeyboardEvent) => { if (event.key === 'Control') controlPressed = event.type === 'keydown'; };
+      window.addEventListener('keydown', controlKey);
+      window.addEventListener('keyup', controlKey);
       const wheel = (event: WheelEvent) => {
         if (
           event.defaultPrevented ||
@@ -376,7 +409,10 @@ const GraphCanvas = memo(
           document.querySelector('dialog[open],[aria-modal="true"]')
         )
           return;
-        if (event.ctrlKey) {
+        const gesture = wheelGesture(event, controlPressed);
+        if (gesture === 'native') return;
+        if (gesture === 'pinch') {
+          if (!Number.isFinite(event.deltaY) || !event.deltaY) return;
           event.preventDefault();
           cameraController.zoomBy(
             Math.exp(Math.max(-120, Math.min(120, event.deltaY)) * 0.005),
@@ -385,6 +421,11 @@ const GraphCanvas = memo(
         }
         const lineHeight =
           parseFloat(getComputedStyle(renderer.domElement).lineHeight) || 16;
+        if (gesture === 'pan') {
+          const delta = wheelPanDelta(event, width, height, lineHeight);
+          if (!delta.x && !delta.y) return;
+          event.preventDefault(); cameraController.panBy(delta.x, delta.y); pointerLeave(); return;
+        }
         const delta = wheelOrbitDelta(event, width, height, lineHeight);
         if (!delta.yaw && !delta.pitch) return;
         event.preventDefault();
@@ -456,6 +497,7 @@ const GraphCanvas = memo(
         if (hidden) cameraController.cancelWheelOrbit();
       };
       const blur = () => {
+        controlPressed = false;
         cancelPointers();
         cameraController.cancelWheelOrbit();
       };
@@ -546,7 +588,7 @@ const GraphCanvas = memo(
                     ? 0.3
                     : 0.19);
           mesh.material.opacity += (alpha - mesh.material.opacity) * blend;
-          materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses, dataset));
+          materialColor.setHex(nodeColor(node.id, state.demoIndex, state.nodeStatuses, graph));
           const selected =
             executionNode === node.id || state.selectedNodeId === node.id;
           materialColor.lerp(
@@ -649,6 +691,9 @@ const GraphCanvas = memo(
         observer.disconnect();
         document.removeEventListener("visibilitychange", visibility);
         window.removeEventListener("blur", blur);
+        window.removeEventListener('keydown', controlKey);
+        window.removeEventListener('keyup', controlKey);
+        syncDataset.current = () => {};
         renderer.domElement.removeEventListener("wheel", wheel, true);
         renderer.domElement.removeEventListener("pointermove", pointerMove);
         renderer.domElement.removeEventListener("pointerleave", pointerLeave);
@@ -682,7 +727,9 @@ const GraphCanvas = memo(
         renderer.dispose();
         renderer.domElement.remove();
       };
-    }, [dataset]);
+    }, []);
+    useEffect(() => { syncDataset.current(dataset); }, [dataset]);
+    useEffect(() => { api.current.reset(); }, [props.graphIdentity]);
 
     return (
       <div ref={host} className="graph-renderer" data-testid="graph-renderer">

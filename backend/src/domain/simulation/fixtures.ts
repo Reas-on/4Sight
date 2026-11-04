@@ -1,6 +1,7 @@
 import type { DecisionParameters, ProposedDecision, RefereeActionType } from '../referee/types.js';
 import { SimulationProviderError } from './errors.js';
 import type { DecisionContext, DecisionProvider } from './types.js';
+import { ACTION_TYPE_BY_STORYLET_ACTION_ID } from '../referee/policies.js';
 
 export type DecisionScript =
   | readonly ProposedDecision[]
@@ -167,4 +168,9 @@ export function createBeginnerFixtureProvider(unsafe = false): ScriptedDecisionP
       context.selectedStorylet.id, internal ? 'escalation-approved' : 'block-approved',
       { sourceId: '203.0.113.25', incidentId: 'demo-ssh-001' });
   });
+}
+
+export function createBranchFixtureProvider(): ScriptedDecisionProvider {
+  return createScriptedDecisionProvider('fixture-branches', context => fixtureDecision('fixture-branches', `branch-${context.sequence}`,
+    ACTION_TYPE_BY_STORYLET_ACTION_ID[context.selectedStorylet.action.id]!, context.selectedStorylet.id, 'recorded'));
 }

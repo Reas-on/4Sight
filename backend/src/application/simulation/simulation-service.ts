@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { immutableDataSnapshot } from '../../domain/immutable.js';
 import { getEligibleStorylets, resolveNextStorylet } from '../../domain/narrative/engine.js';
-import { sshBruteForceScenario } from '../../domain/narrative/scenarios/ssh-brute-force.js';
-import { beginnerContext, beginnerScenario, BEGINNER_SCENARIO_VERSION, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
+import { scenarioRegistry } from '../../domain/narrative/scenarios/registry.js';
+import { beginnerContext, isBeginner, isProposal } from '../../domain/narrative/scenarios/ssh-beginner.js';
 import { advanceNarrative } from '../../domain/narrative/engine.js';
 import { requestDecision } from '../../domain/simulation/decision-provider.js';
 import { SimulationError } from '../../domain/simulation/errors.js';
@@ -34,8 +34,9 @@ export class SimulationService {
 
   private async createRun(scenarioId: string, initialVariant: InitialVariant,
     selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
-    const scenario = [beginnerScenario, sshBruteForceScenario].find(item => item.id === scenarioId);
-    if (!scenario) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
+    const entry = scenarioRegistry.find(item => item.scenario.id === scenarioId);
+    if (!entry) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
+    const { scenario } = entry;
     this.checkCapacity();
     this.reservations += 1;
     try {
@@ -47,7 +48,7 @@ export class SimulationService {
       }
       const accessToken = randomBytes(32).toString('hex');
       const created = await this.repository.create({
-        scenario: immutableDataSnapshot(scenario), scenarioVersion: isBeginner(scenario) ? BEGINNER_SCENARIO_VERSION : '1.0.0', initialVariant,
+        scenario: immutableDataSnapshot(scenario), scenarioVersion: entry.version, initialVariant,
         providerId: provider.id, modelId: provider.provenance?.model ?? null,
         decisionTimeoutMs: provider.decisionTimeoutMs ?? 1000,
         ...(isBeginner(scenario) ? { incidentContext: immutableDataSnapshot(beginnerContext) } : {}),

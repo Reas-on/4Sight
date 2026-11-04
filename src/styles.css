@@ -1671,17 +1671,17 @@ inert {
 }
 .results-audit-heading h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 16.8px;
   font-weight: 500;
   color: #c4d5df;
 }
 .results-audit-heading > span {
-  font: 9px var(--mono);
+  font: 10.8px var(--mono);
   color: #7992a4;
   white-space: nowrap;
 }
 .results-audit > p {
-  font-size: 11px;
+  font-size: 13.2px;
   line-height: 1.7;
   color: #829aaa;
   margin: 9px 0 14px;
@@ -1693,28 +1693,31 @@ inert {
 }
 .results-audit li {
   display: grid;
-  grid-template-columns: 62px 62px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(76px, auto) 74px minmax(0, 1fr) auto;
   align-items: start;
   gap: 10px;
   padding: 11px 0;
   border-top: 1px solid #ffffff07;
-  font-size: 11px;
+  font-size: 13.2px;
   line-height: 1.7;
 }
 .results-audit time {
   color: #718c9e;
-  font: 10px/1.9 var(--mono);
+  font: 12px/1.9 var(--mono);
+  white-space: nowrap;
 }
 .audit-subject {
   color: #98b7c6;
-  font: 10px/1.9 var(--mono);
+  font: 12px/1.9 var(--mono);
+  overflow-wrap: anywhere;
 }
 .audit-description {
+  min-width: 0;
   color: #a8bdc9;
   overflow-wrap: anywhere;
 }
 .audit-outcome {
-  font: 9px/2 var(--mono);
+  font: 10.8px/2 var(--mono);
   padding: 0 5px;
   border-radius: 3px;
   white-space: nowrap;
@@ -1726,6 +1729,7 @@ inert {
 .audit-outcome.info {
   color: #7893a6;
 }
+.audit-outcome.rejected { color: #d7b58f; background: #392e23; }
 .results-footer {
   display: flex;
   align-items: center;
@@ -1820,7 +1824,7 @@ inert {
     gap: 5px;
   }
   .results-audit li {
-    grid-template-columns: 55px minmax(0, 1fr) auto;
+    grid-template-columns: 76px minmax(0, 1fr) auto;
     gap: 5px 7px;
   }
   .audit-subject {
@@ -3447,6 +3451,20 @@ kbd {
   background: var(--chrome-surface-active);
   border-color: var(--border-color);
 }
+.scenario-source-selector:focus-visible,
+.scenario-explorer .source-list-item:focus-visible {
+  outline: 2px solid #a4adb8;
+  outline-offset: 2px;
+}
+.scenario-source-selector:disabled,
+.scenario-explorer .source-list-item:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+.scenario-source-selector[aria-busy="true"] { border-color: #727b87; background: #ffffff08; }
+.scenario-spinner { animation: scenario-spin 0.9s linear infinite; flex-shrink: 0; }
+@keyframes scenario-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .scenario-spinner { animation: none; } }
 .scenario-explorer .source-list-item strong {
   color: var(--chrome-text);
 }

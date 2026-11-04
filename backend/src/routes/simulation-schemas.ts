@@ -3,6 +3,12 @@ import { NarrativeStateSchema, ScenarioDefinitionSchema, TransitionRecordSchema 
 import { ProposedDecisionSchema } from '../domain/referee/schemas.js';
 import { SIMULATION_STATUSES } from '../domain/simulation/types.js';
 import { BEGINNER_SCENARIO_ID } from '../domain/narrative/scenarios/ssh-beginner.js';
+import { BRANCH_SCENARIO_ID } from '../domain/narrative/scenarios/policy-branch.js';
+
+export const ProjectedNodeSchema = Type.Object({ nodeId: Type.String(), storyletId: Type.String(), parentNodeId: Type.Union([Type.String(), Type.Null()]),
+  status: Type.Union((['PENDING', 'RUNNING', 'APPROVED', 'REJECTED', 'SKIPPED', 'FAILED'] as const).map(status => Type.Literal(status))) }, { additionalProperties: false });
+const GraphMetadataSchema = Type.Object({ root: ProjectedNodeSchema,
+  nodes: Type.Array(Type.Object({ nodeId: Type.String(), name: Type.String(), description: Type.String() }, { additionalProperties: false })) }, { additionalProperties: false });
 
 export const ErrorSchema = Type.Object({ error: Type.Object({ code: Type.String(), message: Type.String() }) });
 const nullableString = Type.Union([Type.String(), Type.Null()]);
@@ -44,17 +50,19 @@ export const RunSchema = Type.Object({
   status: Type.Union(SIMULATION_STATUSES.map((status) => Type.Literal(status))),
   revision: Type.Integer(), eventSequence: Type.Integer(), narrative: NarrativeStateSchema,
   records: Type.Array(Type.Object({ sequence: Type.Integer(), decision: ProposedDecisionSchema, referee: VerdictSchema,
-    transition: Type.Union([TransitionRecordSchema, Type.Null()]), recordedAt: Type.String() })),
+    transition: Type.Union([TransitionRecordSchema, Type.Null()]), rejectionTransition: Type.Optional(TransitionRecordSchema), recordedAt: Type.String() })),
   evaluation: Type.Union([EvaluationSchema, Type.Null()]),
   error: Type.Union([Type.Object({ code: Type.String(), message: Type.String(), phase: Type.String(), sequence: Type.Optional(Type.Integer()) }), Type.Null()]),
   createdAt: Type.String(), startedAt: nullableString, completedAt: nullableString, updatedAt: Type.String(),
   workflow: Type.Optional(Type.Object({ proposal: Type.Union([ProposedDecisionSchema, Type.Null()]), transitions: Type.Array(TransitionRecordSchema) }, { additionalProperties: false })),
+  graph: Type.Optional(Type.Object({ sequence: Type.Integer({ minimum: 0 }), nodes: Type.Array(ProjectedNodeSchema) }, { additionalProperties: false })),
 });
 
 export const IdParams = Type.Object({ id: Type.String({ format: 'uuid' }) }, { additionalProperties: false });
 export const EmptyQuery = Type.Object({}, { additionalProperties: false });
 export const ScenarioListSchema = Type.Object({ scenarios: Type.Array(Type.Object({
   id: Type.String(), version: Type.String(), title: Type.String(), initialVariants: Type.Array(Type.String()),
+  graph: Type.Optional(Type.Object({ externalSource: GraphMetadataSchema, protectedInternalSource: GraphMetadataSchema }, { additionalProperties: false })),
 })) });
 export const ModelListSchema = Type.Object({ models: Type.Array(Type.Object({
   providerId: Type.String(), modelId: nullableString, configured: Type.Boolean(),
@@ -62,7 +70,7 @@ export const ModelListSchema = Type.Object({ models: Type.Array(Type.Object({
 export type ScenarioOption = Static<typeof ScenarioListSchema>['scenarios'][number];
 export type ModelOption = Static<typeof ModelListSchema>['models'][number];
 export const CreateRunSchema = Type.Object({
-  scenarioId: Type.Union([Type.Literal('ssh-brute-force'), Type.Literal(BEGINNER_SCENARIO_ID)]),
+  scenarioId: Type.Union([Type.Literal('ssh-brute-force'), Type.Literal(BEGINNER_SCENARIO_ID), Type.Literal(BRANCH_SCENARIO_ID)]),
   initialVariant: Type.Union([Type.Literal('externalSource'), Type.Literal('protectedInternalSource')]),
   providerId: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   modelId: Type.Optional(Type.Unsafe<string | null>({ type: ['string', 'null'] })),
@@ -80,6 +88,7 @@ export const AuditEventSchema = Type.Object({
   sequence: Type.Integer({ minimum: 1 }), eventType: Type.String(),
   storyletId: nullableString, nodeId: nullableString, stateVersion: Type.Integer({ minimum: 0 }),
   payload: Type.Union([
+    Type.Object({ nodes: Type.Array(ProjectedNodeSchema) }, { additionalProperties: false }),
     Type.Object({ status: Type.String() }, { additionalProperties: false }),
     Type.Object({ decisionSequence: Type.Integer(), verdict: Type.String(), violatedPolicyIds: Type.Array(Type.String()) }, { additionalProperties: false }),
     Type.Object({ decisionSequence: Type.Integer() }, { additionalProperties: false }),

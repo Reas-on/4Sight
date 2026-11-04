@@ -47,6 +47,7 @@ export interface SimulationRecord {
   readonly decision: ProposedDecision;
   readonly referee: RefereeResult;
   readonly transition: TransitionRecord | null;
+  readonly rejectionTransition?: TransitionRecord;
   readonly recordedAt: string;
 }
 

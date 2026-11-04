@@ -154,6 +154,13 @@ export class GraphCameraController {
     );
     this.apply(distance);
   }
+  panBy(x: number, y: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.beginManualControl();
+    this.pan(x, y);
+    this.endManualControl();
+  }
+  setGraphRadius(radius: number) { this.graphRadius = radius; }
   reframe(ratio: number) {
     if (!this.manual && !this.keys.size && !this.hasWheelOrbit())
       this.moveTo(

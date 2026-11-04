@@ -1,4 +1,4 @@
-import { advanceNarrative } from '../narrative/engine.js';
+import { advanceNarrative, resolveNextStorylet } from '../narrative/engine.js';
 import { evaluateDecision } from '../referee/evaluator.js';
 import { validateProposedDecision } from '../referee/schemas.js';
 import type { NarrativeState, ScenarioDefinition } from '../narrative/types.js';
@@ -19,6 +19,14 @@ export function evaluateSimulationStep(
   const decision = validateProposedDecision(raw);
   const referee = evaluateDecision(decision, state, scenario, { policySet });
   if (!referee.approved) {
+    const resolution = resolveNextStorylet(state, scenario);
+    const selected = resolution.status === 'eligible' ? resolution.storylet : undefined;
+    if (selected?.rejectionOutcomeId) {
+      const routed = advanceNarrative(state, scenario, { storyletId: selected.id, outcomeId: selected.rejectionOutcomeId });
+      if (routed.status !== 'advanced') throw new SimulationNarrativeError('NARRATIVE_NOT_ADVANCED', 'Rejection route did not advance');
+      return { state: routed.state, record: Object.freeze({ sequence, decision, referee, transition: null,
+        rejectionTransition: routed.record, recordedAt }), error: null };
+    }
     return { state, record: Object.freeze({ sequence, decision, referee, transition: null, recordedAt }), error: null };
   }
   try {

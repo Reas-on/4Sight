@@ -19,6 +19,7 @@ import {
   FileCheck2,
   Focus,
   Layers3,
+  LoaderCircle,
   List,
   Maximize2,
   Minimize2,
@@ -49,14 +50,16 @@ import ScenarioExplorer from "./components/ScenarioExplorer";
 import ResultsPanel from "./components/ResultsPanel";
 import { useSimulationRun } from "./hooks/useSimulationRun";
 import { useBackendCatalog } from "./hooks/useBackendCatalog";
-import { backendResult, nodePresentation, scenarioSources } from "./data/backendPresentation";
+import { backendResult, scenarioSources } from "./data/backendPresentation";
+import { dynamicGraph, scenarioMetadata } from "./data/dynamicGraph";
+import { simulationApi } from "./api/simulation";
+import type { ScenarioGraphMetadata } from "../backend/src/domain/simulation/graph-projection";
+import { useRetryShortcut } from "./hooks/useRetryShortcut";
 import type { RunInput } from "./api/types";
 import {
-  beginnerGraph, legacyGraph,
   statusFor,
   statusLabel,
 } from "./data/graph";
-import { BEGINNER_SCENARIO_ID } from "../backend/src/domain/narrative/scenarios/ssh-beginner";
 import { useMotion, useReducedMotion } from "./hooks/useMotion";
 import {
   HOLD_DURATION,
@@ -110,14 +113,22 @@ export default function App() {
   });
   const [importedSources, setImportedSources] = useState<ImportedSource[]>([]);
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [scenarioLoad, setScenarioLoad] = useState<"EMPTY" | "LOADING" | "READY" | "ERROR">("EMPTY");
+  const [scenarioError, setScenarioError] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<ScenarioGraphMetadata | null>(null);
+  const selectionRequest = useRef(0);
+  const selectionAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => selectionAbort.current?.abort(), []);
   useEffect(() => {
-    if (executableSources.length) setWorkspace((current) => current.selectedSource ? current : { ...current, selectedSource: executableSources[0] });
     const available = models.find((model) => model.configured);
     if (available) setSelectedAgent((current) => current || modelKey(available));
   }, [executableSources, models]);
   const selectedModel = models.find((model) => modelKey(model) === selectedAgent && model.configured);
-  const supportedSource = executableSources.find((source) => source.id === workspace.selectedSource?.id);
+  const supportedSource = scenarioLoad === "READY" && metadata && workspace.selectedSource?.sourceType === "builtin"
+    ? executableSources.find((source) => source.id === workspace.selectedSource?.id) : undefined;
   const executionBlock = loading ? "Connecting to backend…" : catalogError ? `Backend connection error: ${catalogError}`
+    : scenarioLoad === "LOADING" ? "Loading scenario…" : scenarioLoad === "ERROR" ? scenarioError ?? "Scenario loading failed."
+    : !workspace.selectedSource ? "Choose scenario"
     : !supportedSource ? "This source is preview-only. Select a backend-supported scenario in the Explorer."
     : additionalContextError(workspace.additionalContext) ?? (workspace.additionalContext.trim() ? "Additional Context is retained, but arbitrary context is unsupported by the backend. Clear it to run."
     : !selectedModel ? "No configured provider/model is available. Configure the backend provider."
@@ -145,31 +156,37 @@ export default function App() {
     setResultsOpen,
     toggleResults,
     canRetry,
-    presentation,
+    clearPresentation,
   } = useSimulationRun(input, executionBlock);
-  const graph = (snapshot?.configuration.scenario.id ?? input?.scenarioId) === BEGINNER_SCENARIO_ID ? beginnerGraph : legacyGraph;
+  const projection = useMemo(() => dynamicGraph(metadata, snapshot, events,
+    scenarioLoad === "READY" && !metadata ? workspace.selectedSource ?? undefined : undefined), [metadata, snapshot, events, scenarioLoad, workspace.selectedSource]);
+  const graph = projection.dataset;
   const { steps, neighbors, nodeById } = graph;
   const simulationStatus = snapshot?.status ?? "IDLE";
   const restoredSelection = useRef<string | null>(null);
   useEffect(() => {
-    if (!snapshot || restoredSelection.current === snapshot.id || !executableSources.length) return;
+    if (!snapshot || restoredSelection.current === snapshot.id || !executableSources.length || selectionRequest.current > 0) return;
     restoredSelection.current = snapshot.id;
     const source = executableSources.find((item) => item.id === `backend:${snapshot.configuration.scenario.id}:${snapshot.configuration.initialVariant}`);
-    if (source) setWorkspace((current) => ({ ...current, selectedSource: source }));
+    if (source) {
+      setWorkspace((current) => ({ ...current, selectedSource: source }));
+      const restoredMetadata = scenarioMetadata(scenarios, source.id);
+      setMetadata(restoredMetadata); setScenarioLoad(restoredMetadata ? "READY" : "ERROR");
+      if (!restoredMetadata) setScenarioError("Supported scenario metadata is unavailable.");
+    }
     const providerId = snapshot.configuration.providerId.startsWith("fixture-") ? "fixture" : snapshot.configuration.providerId;
     setSelectedAgent(`${providerId}:${snapshot.configuration.modelId ?? ""}`);
-  }, [snapshot, executableSources]);
+  }, [snapshot, executableSources, scenarios]);
   const evaluationResult = backendResult(snapshot, events);
-  const { statuses: nodeStatuses, activeNodeId } = presentation ?? (graph === beginnerGraph
-    ? { statuses: Object.fromEntries(steps.map(step => [step.id, "ready" as const])), activeNodeId: null }
-    : nodePresentation(snapshot, events));
-  const presenting = !!presentation?.activeNodeId;
+  const { statuses: nodeStatuses, activeNodeId } = projection;
   useEffect(() => {
-    if (presentation?.activeNodeId) {
-      setSelectedNodeId(presentation.activeNodeId);
+    if (activeNodeId) {
+      setSelectedNodeId(activeNodeId);
       if (window.innerWidth >= 1100) setRightOpen(true);
     }
-  }, [presentation?.activeNodeId]);
+  }, [activeNodeId]);
+  useRetryShortcut(canRetry, retryDemonstration);
+  const selectionLocked = pending || !!runId && (!snapshot || !completed);
   const demoIndex = activeNodeId ? steps.findIndex((step) => step.id === activeNodeId) : -1;
   const simulationDisabled = pending || !!runId && !snapshot || !!executionBlock && !completed && !running;
   const simulationAction = useCallback(() => {
@@ -200,8 +217,13 @@ export default function App() {
       : snapshot?.status === "PAUSED"
         ? "Resume demonstration"
         : "Run demonstration";
-  const confirmSource = (source: ImportedSource) => {
-    if (source.id !== workspace.selectedSource?.id) pauseDemonstration();
+  const confirmSource = async (source: ImportedSource) => {
+    if (selectionLocked || !clearPresentation()) return;
+    const token = ++selectionRequest.current;
+    selectionAbort.current?.abort();
+    const controller = new AbortController(); selectionAbort.current = controller;
+    setMetadata(null); setScenarioLoad("LOADING"); setScenarioError(null);
+    setSelectedNodeId(null); setHoveredNodeId(null); setFocusedNodeId(null);
     setWorkspace((current) => ({ ...current, selectedSource: source }));
     if (source.sourceType === "local_file")
       setImportedSources((current) =>
@@ -210,6 +232,19 @@ export default function App() {
           : [...current, source],
       );
     setExplorerOpen(false);
+    try {
+      let loaded: ScenarioGraphMetadata | null = null;
+      if (source.sourceType === "builtin" && source.id.startsWith("backend:")) {
+        const catalog = await simulationApi.scenarios(controller.signal);
+        loaded = scenarioMetadata(catalog.scenarios, source.id);
+        if (!loaded) throw new Error("Supported scenario metadata is unavailable.");
+      }
+      if (token !== selectionRequest.current || controller.signal.aborted) return;
+      setMetadata(loaded); setScenarioLoad("READY");
+    } catch (failure) {
+      if (token !== selectionRequest.current || controller.signal.aborted) return;
+      setScenarioLoad("ERROR"); setScenarioError(failure instanceof Error ? failure.message : "Scenario loading failed.");
+    }
   };
   const audioCursor = useRef({ runId: "", sequence: 0 });
   const audioMountedAt = useRef(Date.now());
@@ -372,6 +407,7 @@ export default function App() {
       data-demo-running={running}
       data-simulation-status={simulationStatus}
       data-run-id={runId}
+      data-scenario-state={scenarioLoad}
       data-results-open={isResultsOpen}
       style={{ "--hold-duration": `${HOLD_DURATION}ms` } as CSSProperties}
     >
@@ -487,16 +523,18 @@ export default function App() {
                   className="scenario-source-selector"
                   aria-label="Open Scenario Explorer"
                   aria-haspopup="dialog"
+                  disabled={selectionLocked}
+                  aria-busy={scenarioLoad === "LOADING"}
                   onClick={() => setExplorerOpen(true)}
                 >
-                  <ShieldCheck size={16} />
+                  {scenarioLoad === "LOADING" ? <LoaderCircle size={16} className="scenario-spinner" /> : <ShieldCheck size={16} />}
                   <span>
                     <strong>
-                      {workspace.selectedSource?.name ?? "Choose a scenario"}
+                      {workspace.selectedSource?.name ?? "Choose scenario"}
                     </strong>
                     <small>
                       {workspace.selectedSource
-                        ? sourceLabels[workspace.selectedSource.sourceType]
+                        ? `${sourceLabels[workspace.selectedSource.sourceType]} · ${scenarioLoad === "READY" ? metadata ? "READY" : "PREVIEW ONLY" : scenarioLoad}`
                         : "No source selected"}
                     </small>
                     <small>
@@ -514,6 +552,7 @@ export default function App() {
                 </label>
                 <div className="custom-scenario-input">
                   <textarea
+                    disabled={selectionLocked}
                     id="additional-context"
                     name="additionalContext"
                     aria-label="Additional Context"
@@ -666,7 +705,7 @@ export default function App() {
                 </h1>
                 <p>
                   {executionBlock
-                    ? "Reference playbook only · not generated from the selected source or context."
+                     ? workspace.selectedSource ? "Scenario preview · execution unavailable until supported and ready." : "Choose scenario to reveal its entry node."
                     : "A clearer view of every decision."}
                 </p>
               </div>
@@ -703,6 +742,7 @@ export default function App() {
             >
               <GraphCanvas
                 dataset={graph}
+                graphIdentity={`${workspace.selectedSource?.id ?? ""}:${runId ?? ""}`}
                 ref={graphApi}
                 selectedNodeId={selectedNodeId}
                 hoveredNodeId={hoveredNodeId}
@@ -715,12 +755,12 @@ export default function App() {
                 isImmersive={isImmersive}
                 reducedMotion={reduced}
                 demoIndex={demoIndex}
-                running={running || presenting}
+                running={running}
                 runId={runId ?? ""}
-                executionIdentity={`${runId ?? ""}:${presentation?.frameSequence ?? events.filter((event) => event.eventType === "step.started").at(-1)?.sequence ?? 0}`}
+                executionIdentity={`${runId ?? ""}:${activeNodeId ?? ""}`}
                 nodeStatuses={nodeStatuses}
                 activeNodeId={activeNodeId}
-                terminal={completed && !presenting}
+                terminal={completed}
                 showContext={showContext}
                 visible={view === "graph"}
               />
@@ -941,7 +981,7 @@ export default function App() {
                 </div>
                 <div className="canvas-bottom-right">
                   <span className="drag-hint">
-                    Drag / scroll / arrows to orbit<span>·</span>+ / − to zoom
+                    Drag / scroll to orbit<span>·</span>Ctrl + drag / scroll to pan<span>·</span>+ / − to zoom
                   </span>
                   <span className="space-hint">
                     <kbd>space</kbd> {HOLD_HINT} to{" "}
@@ -956,7 +996,7 @@ export default function App() {
                 <NodeDetails
                     dataset={graph}
                     run={snapshot}
-                    events={presentation?.visibleEvents ?? events}
+                    events={events}
                   id={selectedNodeId}
                   demoIndex={demoIndex}
                   nodeStatuses={nodeStatuses}
@@ -1020,7 +1060,7 @@ export default function App() {
               <NodeDetails
                   dataset={graph}
                   run={snapshot}
-                  events={presentation?.visibleEvents ?? events}
+                  events={events}
                 id={selectedNodeId}
                 demoIndex={demoIndex}
                 nodeStatuses={nodeStatuses}
@@ -1088,7 +1128,8 @@ export default function App() {
         selectedSource={workspace.selectedSource}
         importedSources={importedSources}
         executableSources={executableSources}
-        onConfirm={confirmSource}
+        disabled={selectionLocked}
+        onConfirm={(source) => void confirmSource(source)}
         onDismiss={() => setExplorerOpen(false)}
       />
       <ResultsPanel
@@ -1132,7 +1173,7 @@ export default function App() {
             <span className={`switch ${showContext ? "on" : ""}`} />
           </button>
           <p id="context-setting-description" className="field-caption">
-            Show display-only context around the five workflow steps. This
+            Show available context relationships around revealed workflow steps. This
             preference is retained for the current session.
           </p>
         </section>
@@ -1165,11 +1206,11 @@ export default function App() {
           </div>
           <div>
             <span>Zoom in or out</span>
-            <kbd>+ / − · pinch / Ctrl+scroll</kbd>
+            <kbd>+ / − · pinch</kbd>
           </div>
           <div>
             <span>Pan the camera</span>
-            <kbd>Ctrl + drag / right drag / two fingers</kbd>
+            <kbd>Ctrl + drag / Ctrl + scroll / right drag</kbd>
           </div>
           <div>
             <span>Inspect a node</span>
@@ -1182,6 +1223,10 @@ export default function App() {
           <div>
             <span>Run / resume / stop demonstration</span>
             <kbd>Ctrl + Space</kbd>
+          </div>
+          <div>
+            <span>Retry demonstration</span>
+            <kbd>R</kbd>
           </div>
           <div>
             <span>Toggle cursor in immersive mode</span>

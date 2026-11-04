@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { wheelOrbitDelta, WHEEL_ORBIT_SENSITIVITY } from "./wheelOrbit";
+import { wheelGesture, wheelPanDelta, wheelOrbitDelta, WHEEL_ORBIT_SENSITIVITY } from "./wheelOrbit";
+
+it('distinguishes physical Ctrl pan from synthesized pinch and normal orbit', () => {
+  const event = { ctrlKey: true, altKey: false, metaKey: false };
+  expect(wheelGesture(event, true)).toBe('pan');
+  expect(wheelGesture(event, false)).toBe('pinch');
+  expect(wheelGesture({ ...event, ctrlKey: false }, false)).toBe('orbit');
+  expect(wheelGesture({ ...event, metaKey: true }, true)).toBe('native');
+  expect(wheelPanDelta({ deltaX: 16, deltaY: -32, deltaMode: 0 }, 800, 600)).toEqual({ x: 16 / 600, y: -32 / 600 });
+  expect(wheelPanDelta({ deltaX: 1, deltaY: -2, deltaMode: 1 }, 800, 600)).toEqual({ x: 16 / 600, y: -32 / 600 });
+});
 
 describe("normalized wheel orbit", () => {
   it("preserves independent fractional pixel axes and diagonal direction", () => {

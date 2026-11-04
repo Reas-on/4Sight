@@ -96,6 +96,10 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "rejectionOutcomeId": {
+                      "const": "response-rejected",
+                      "type": "string"
+                    },
                     "priority": {
                       "minimum": -1000,
                       "maximum": 1000,
@@ -1236,6 +1240,130 @@
                 }
               ]
             },
+            "rejectionTransition": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "sequence",
+                "storyletId",
+                "outcomeId",
+                "previousStateVersion",
+                "nextStateVersion",
+                "appliedEffects"
+              ],
+              "properties": {
+                "sequence": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "storyletId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "outcomeId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "previousStateVersion": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "nextStateVersion": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "appliedEffects": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "value"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "set",
+                            "type": "string"
+                          },
+                          "field": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "by"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "increment",
+                            "type": "string"
+                          },
+                          "field": {
+                            "type": "string"
+                          },
+                          "by": {
+                            "minimum": -100,
+                            "maximum": 100,
+                            "type": "integer"
+                          }
+                        }
+                      },
+                      {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "field",
+                          "value"
+                        ],
+                        "properties": {
+                          "type": {
+                            "const": "append",
+                            "type": "string"
+                          },
+                          "field": {
+                            "const": "completedEvents",
+                            "type": "string"
+                          },
+                          "value": {
+                            "pattern": "^event:[a-z0-9-]+$",
+                            "maxLength": 200,
+                            "type": "string"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "graphNodeId": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              }
+            },
             "recordedAt": {
               "type": "string"
             }
@@ -1822,6 +1950,79 @@
             }
           }
         }
+      },
+      "graph": {
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sequence",
+          "nodes"
+        ],
+        "properties": {
+          "sequence": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "nodeId",
+                "storyletId",
+                "parentNodeId",
+                "status"
+              ],
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "storyletId": {
+                  "type": "string"
+                },
+                "parentNodeId": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
+                      "const": "PENDING",
+                      "type": "string"
+                    },
+                    {
+                      "const": "RUNNING",
+                      "type": "string"
+                    },
+                    {
+                      "const": "APPROVED",
+                      "type": "string"
+                    },
+                    {
+                      "const": "REJECTED",
+                      "type": "string"
+                    },
+                    {
+                      "const": "SKIPPED",
+                      "type": "string"
+                    },
+                    {
+                      "const": "FAILED",
+                      "type": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
@@ -1880,6 +2081,74 @@
       },
       "payload": {
         "anyOf": [
+          {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "nodes"
+            ],
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "nodeId",
+                    "storyletId",
+                    "parentNodeId",
+                    "status"
+                  ],
+                  "properties": {
+                    "nodeId": {
+                      "type": "string"
+                    },
+                    "storyletId": {
+                      "type": "string"
+                    },
+                    "parentNodeId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "const": "PENDING",
+                          "type": "string"
+                        },
+                        {
+                          "const": "RUNNING",
+                          "type": "string"
+                        },
+                        {
+                          "const": "APPROVED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "REJECTED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "SKIPPED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "FAILED",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
           {
             "additionalProperties": false,
             "type": "object",
@@ -2233,6 +2502,10 @@
           {
             "const": "ssh-login-investigation-beginner",
             "type": "string"
+          },
+          {
+            "const": "policy-rejection-branches",
+            "type": "string"
           }
         ]
       },
@@ -2366,6 +2639,10 @@
                         },
                         "graphNodeId": {
                           "minLength": 1,
+                          "type": "string"
+                        },
+                        "rejectionOutcomeId": {
+                          "const": "response-rejected",
                           "type": "string"
                         },
                         "priority": {
@@ -3508,6 +3785,130 @@
                     }
                   ]
                 },
+                "rejectionTransition": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "sequence",
+                    "storyletId",
+                    "outcomeId",
+                    "previousStateVersion",
+                    "nextStateVersion",
+                    "appliedEffects"
+                  ],
+                  "properties": {
+                    "sequence": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "storyletId": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "outcomeId": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "previousStateVersion": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "nextStateVersion": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "appliedEffects": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "value"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "set",
+                                "type": "string"
+                              },
+                              "field": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "by"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "increment",
+                                "type": "string"
+                              },
+                              "field": {
+                                "type": "string"
+                              },
+                              "by": {
+                                "minimum": -100,
+                                "maximum": 100,
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          {
+                            "additionalProperties": false,
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "field",
+                              "value"
+                            ],
+                            "properties": {
+                              "type": {
+                                "const": "append",
+                                "type": "string"
+                              },
+                              "field": {
+                                "const": "completedEvents",
+                                "type": "string"
+                              },
+                              "value": {
+                                "pattern": "^event:[a-z0-9-]+$",
+                                "maxLength": 200,
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "graphNodeId": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  }
+                },
                 "recordedAt": {
                   "type": "string"
                 }
@@ -4094,6 +4495,79 @@
                 }
               }
             }
+          },
+          "graph": {
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "sequence",
+              "nodes"
+            ],
+            "properties": {
+              "sequence": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "nodeId",
+                    "storyletId",
+                    "parentNodeId",
+                    "status"
+                  ],
+                  "properties": {
+                    "nodeId": {
+                      "type": "string"
+                    },
+                    "storyletId": {
+                      "type": "string"
+                    },
+                    "parentNodeId": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "status": {
+                      "anyOf": [
+                        {
+                          "const": "PENDING",
+                          "type": "string"
+                        },
+                        {
+                          "const": "RUNNING",
+                          "type": "string"
+                        },
+                        {
+                          "const": "APPROVED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "REJECTED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "SKIPPED",
+                          "type": "string"
+                        },
+                        {
+                          "const": "FAILED",
+                          "type": "string"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4443,6 +4917,194 @@
               "type": "array",
               "items": {
                 "type": "string"
+              }
+            },
+            "graph": {
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "externalSource",
+                "protectedInternalSource"
+              ],
+              "properties": {
+                "externalSource": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "root",
+                    "nodes"
+                  ],
+                  "properties": {
+                    "root": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "nodeId",
+                        "storyletId",
+                        "parentNodeId",
+                        "status"
+                      ],
+                      "properties": {
+                        "nodeId": {
+                          "type": "string"
+                        },
+                        "storyletId": {
+                          "type": "string"
+                        },
+                        "parentNodeId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "const": "PENDING",
+                              "type": "string"
+                            },
+                            {
+                              "const": "RUNNING",
+                              "type": "string"
+                            },
+                            {
+                              "const": "APPROVED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "REJECTED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "SKIPPED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "FAILED",
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "nodeId",
+                          "name",
+                          "description"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "protectedInternalSource": {
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "root",
+                    "nodes"
+                  ],
+                  "properties": {
+                    "root": {
+                      "additionalProperties": false,
+                      "type": "object",
+                      "required": [
+                        "nodeId",
+                        "storyletId",
+                        "parentNodeId",
+                        "status"
+                      ],
+                      "properties": {
+                        "nodeId": {
+                          "type": "string"
+                        },
+                        "storyletId": {
+                          "type": "string"
+                        },
+                        "parentNodeId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "const": "PENDING",
+                              "type": "string"
+                            },
+                            {
+                              "const": "RUNNING",
+                              "type": "string"
+                            },
+                            {
+                              "const": "APPROVED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "REJECTED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "SKIPPED",
+                              "type": "string"
+                            },
+                            {
+                              "const": "FAILED",
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "nodes": {
+                      "type": "array",
+                      "items": {
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "nodeId",
+                          "name",
+                          "description"
+                        ],
+                        "properties": {
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }

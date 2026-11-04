@@ -65,6 +65,15 @@ export function buildSimulationEvaluation(
       throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision and transition versions are inconsistent');
     }
     if (record.transition) stateVersion++;
+    if (record.rejectionTransition) {
+      const route = record.rejectionTransition;
+      if (record.referee.approved || record.transition ||
+          route.outcomeId !== 'response-rejected' || route.previousStateVersion !== stateVersion ||
+          route.nextStateVersion !== stateVersion + 1 || route.sequence !== stateVersion + 1) {
+        throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Invalid rejection routing evidence');
+      }
+      stateVersion++;
+    }
     if (runtime.workflowTransitions && record.transition && !runtime.workflowTransitions.some(item =>
       item.storyletId === record.transition!.storyletId && item.nextStateVersion === record.transition!.nextStateVersion && item.outcomeId === record.transition!.outcomeId)) {
       throw new SimulationError('EVALUATION_EVIDENCE_MISMATCH', 'Decision transition is missing from workflow evidence');

@@ -51,12 +51,15 @@ export default function NodeDetails({
         <span>Click a node in the graph to begin</span>
       </div>
     );
-  const step = steps.find((step) => step.id === node.parentId)!;
+  const step = steps.find((step) => step.id === (node.kind === 'workflow' ? node.id : node.parentId))!;
   const status = nodeStatuses?.[node.id] ?? statusFor(node.id, demoIndex);
   const explanation = events.find(event => event.eventType === "decision.proposed");
-  const proposal = explanation ? run?.workflow?.proposal : null;
-  const decision = events.some(event => event.eventType === "decision.evaluated") ? run?.records.at(-1) : null;
-  const decisionNode = ["N-04", "N-05", "N-06", "N-07", "N-10"].includes(node.id) && !["ready", "skipped", "not-evaluated"].includes(status);
+  const evaluated = [...events].reverse().find(event => event.eventType === 'decision.evaluated' && event.nodeId === node.id);
+  const decision = evaluated ? run?.records.find(record => record.sequence === evaluated.payload.decisionSequence) ??
+    run?.records.find(record => record.decision.storyletId === evaluated.storyletId)
+    : run?.workflow && ['N-07', 'N-10'].includes(node.id) ? run.records[0] : null;
+  const proposal = explanation ? run?.workflow?.proposal : decision?.decision;
+  const decisionNode = !["ready", "skipped", "not-evaluated"].includes(status) && (!!decision || !!run?.workflow && ["N-04", "N-05", "N-06"].includes(node.id));
   const incident = run?.configuration.incidentContext;
   return (
     <div
@@ -98,7 +101,7 @@ export default function NodeDetails({
         <div>
           <dt>Execution</dt>
           <dd>
-            {node.kind === "workflow" ? "Simulated only" : "Non-executable"}
+            {node.kind === "workflow" && node.id !== 'PREVIEW' ? "Simulated only" : "Non-executable"}
           </dd>
         </div>
         <div>
@@ -107,10 +110,10 @@ export default function NodeDetails({
         </div>
         <div>
           <dt>Source</dt>
-          <dd>{run?.workflow ? "Backend executable scenario" : "Illustrative dataset"}</dd>
+          <dd>{run ? "Backend executable scenario" : "Scenario preview"}</dd>
         </div>
       </dl>
-      {run?.workflow && node.kind === "workflow" && (
+      {run && node.kind === "workflow" && (
         <>
           <div className="detail-rule" />
           <h4>EXECUTION EVIDENCE</h4>
@@ -147,7 +150,7 @@ export default function NodeDetails({
             <Braces size={16} />
             <div>
               <strong>{step.technique}</strong>
-              <span>{run?.workflow ? "Backend scenario · persisted evidence" : "Illustrative reference · not evaluated"}</span>
+              <span>{run ? "Backend scenario · persisted evidence" : "Scenario preview · not evaluated"}</span>
             </div>
             <ArrowUpRight size={13} />
           </div>

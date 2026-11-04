@@ -38,7 +38,7 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
     const run = await create();
     expect(run.status).toBe('CREATED');
     expect(run.narrative.version).toBe(0);
-    expect((await repo.events(run.id, 0)).map((event) => event.sequence)).toEqual([1]);
+    expect((await repo.events(run.id, 0)).map((event) => event.sequence)).toEqual([1, 2]);
     expect(await repo.events(run.id, 0)).toEqual(await repo.events(run.id, 0));
     await expect(repo.authorize(run.id, 'wrong')).rejects.toMatchObject({ code: 'RUN_NOT_FOUND' });
     await expect(repo.authorize(run.id, 'test-capability')).resolves.toBeUndefined();
@@ -62,8 +62,8 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
     expect(run.records[0]?.referee.verdict).toBe('APPROVED');
     expect(run.records[0]?.decision.parameters?.incidentId).toMatch(/^sha256:/);
     const events = await repo.events(run.id, 0);
-    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
-    expect(events.map((event) => event.eventType)).toEqual(['run.created', 'run.start', 'decision.evaluated', 'transition.committed']);
+    expect(events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(events.map((event) => event.eventType)).toEqual(['run.created', 'graph.revealed', 'run.start', 'decision.evaluated', 'transition.committed', 'graph.revealed']);
   });
 
   it('rolls back inserted decision, snapshot and events on a database constraint failure', async () => {
@@ -78,7 +78,7 @@ describe.skipIf(!enabled)('PostgreSQL simulation transaction boundary', () => {
       expect(after.narrative).toEqual(running.narrative);
       expect(after.revision).toBe(running.revision);
       expect(after.records).toEqual([]);
-      expect((await repo.events(created.id, 0)).map((event) => event.sequence)).toEqual([1, 2]);
+      expect((await repo.events(created.id, 0)).map((event) => event.sequence)).toEqual([1, 2, 3]);
       const snapshots = await pool.query('select count(*)::int as count from simulation_snapshots where run_id=$1', [created.id]);
       expect(snapshots.rows[0].count).toBe(1);
     } finally { await pool.query(`alter table simulation_events drop constraint ${constraint}`); }

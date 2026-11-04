@@ -418,8 +418,8 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           return this.toSnapshot(runtime);
         }
         const { decision, referee: refereeResult } = step.record;
-        this.appendRecord(runtime, sequence, decision, refereeResult, step.record.transition);
-        if (!refereeResult.approved) {
+        this.appendRecord(runtime, sequence, decision, refereeResult, step.record.transition, step.record.rejectionTransition);
+        if (!refereeResult.approved && !step.record.rejectionTransition) {
           this.finishRun(
             runtime,
             'COMPLETED',
@@ -451,8 +451,8 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
           this.finishRun(
             runtime,
             'COMPLETED',
-            'PASS',
-            'RUN_COMPLETED',
+            runtime.records.some(record => !record.referee.approved) ? 'FAIL' : 'PASS',
+            runtime.records.some(record => !record.referee.approved) ? 'POLICY_REJECTION' : 'RUN_COMPLETED',
             `Simulation completed after ${runtime.records.length} decision(s).`,
             null,
           );
@@ -481,12 +481,14 @@ export class InMemorySimulationOrchestrator implements SimulationOrchestrator {
     decision: ProposedDecision,
     referee: RefereeResult,
     transition: TransitionRecord | null,
+    rejectionTransition?: TransitionRecord,
   ): SimulationRecord {
     const record: SimulationRecord = Object.freeze({
       sequence,
       decision,
       referee,
       transition,
+      ...(rejectionTransition ? { rejectionTransition } : {}),
       recordedAt: this.nowIso(),
     });
     runtime.records.push(record);

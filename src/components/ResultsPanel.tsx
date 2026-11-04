@@ -166,7 +166,7 @@ export default function ResultsPanel({
               <div>
                 <span>Total Steps</span>
                 <strong data-testid="results-step-count">
-                  {run.workflow ? new Set(run.workflow.transitions.map(transition => transition.graphNodeId)).size : run.records.filter((record) => record.transition).length}
+                  {run.workflow ? new Set(run.workflow.transitions.map(transition => transition.graphNodeId)).size : run.records.filter((record) => record.transition || record.rejectionTransition).length}
                 </strong>
                 <small>Committed narrative steps</small>
               </div>
@@ -219,7 +219,7 @@ export default function ResultsPanel({
                     {event.eventType === "decision.evaluated" && record && ` · ${record.referee.reasonCode} · ${record.referee.violatedPolicies.map((policy) => `${policy.policyId}: ${policy.reasonCode}`).join("; ")} · ${record.referee.reasons.join("; ")} ${record.referee.evidence.join("; ")}`}
                   </span>
                   <span
-                    className={`audit-outcome ${outcome === "PASS" || outcome === "APPROVED" ? "pass" : "info"}`}
+                    className={`audit-outcome ${outcome === "PASS" || outcome === "APPROVED" ? "pass" : outcome === "REJECTED" || outcome === "FAIL" ? "rejected" : "info"}`}
                   >
                     {outcome}
                   </span>

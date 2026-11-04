@@ -27,6 +27,24 @@ function setup() {
 }
 
 describe("shared graph camera controller", () => {
+  it('wheel pan respects orientation and distance without orbiting or resuming old focus', () => {
+    const { camera, controller, advance } = setup();
+    controller.dragBy(0.8, 0.4);
+    controller.navigateToNode('N-01');
+    const target = controller.target.clone();
+    const orientation = camera.quaternion.clone();
+    const distance = camera.position.distanceTo(target);
+    controller.panBy(0.02, -0.03);
+    const delta = controller.target.clone().sub(target);
+    expect(delta.dot(new Vector3(0, 0, 1).applyQuaternion(orientation))).toBeCloseTo(0);
+    expect(camera.quaternion.angleTo(orientation)).toBeCloseTo(0);
+    expect(camera.position.distanceTo(controller.target)).toBeCloseTo(distance);
+    const after = controller.target.clone(); advance(1);
+    expect(controller.target.distanceTo(after)).toBeCloseTo(0);
+    controller.initializeDistance(distance * 2);
+    controller.panBy(0.02, -0.03);
+    expect(controller.target.distanceTo(after)).toBeCloseTo(delta.length() * 2);
+  });
   it("execution focus yields for the current step, resumes next step and returns to overview", () => {
     const { controller, camera, advance } = setup();
     controller.syncExecution(1, "N-01", true, false);

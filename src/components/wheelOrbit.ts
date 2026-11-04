@@ -21,3 +21,12 @@ export function wheelOrbitDelta(
     pitch: y * limit * WHEEL_ORBIT_SENSITIVITY,
   };
 }
+
+/** Browsers synthesize ctrlKey for pinch without a physical Control keydown. */
+export function wheelGesture(event: Pick<WheelEvent, 'ctrlKey' | 'altKey' | 'metaKey'>, controlPressed: boolean) {
+  return event.altKey || event.metaKey ? 'native' : event.ctrlKey ? controlPressed ? 'pan' : 'pinch' : 'orbit';
+}
+export function wheelPanDelta(event: WheelInput, width: number, height: number, lineHeight = 16) {
+  const delta = wheelOrbitDelta(event, width, height, lineHeight);
+  return { x: delta.yaw / WHEEL_ORBIT_SENSITIVITY / Math.max(1, height), y: delta.pitch / WHEEL_ORBIT_SENSITIVITY / Math.max(1, height) };
+}

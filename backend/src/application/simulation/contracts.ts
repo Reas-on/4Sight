@@ -29,6 +29,7 @@ export interface DurableRun {
   readonly completedAt: string | null;
   readonly updatedAt: string;
   readonly workflow?: { readonly proposal: ProposedDecision | null; readonly transitions: readonly TransitionRecord[] };
+  readonly graph?: import('../../domain/simulation/graph-projection.js').GraphProjection;
 }
 
 export interface AuditEvent {

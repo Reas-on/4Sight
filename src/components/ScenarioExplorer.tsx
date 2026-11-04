@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FileText, Globe, Search, Upload, X } from "lucide-react";
+import { Check, FileText, Globe, LoaderCircle, Search, Upload, X } from "lucide-react";
 import {
   builtinScenarios,
   filterSources,
@@ -20,6 +20,7 @@ type Props = {
   selectedSource: ImportedSource | null;
   importedSources: ImportedSource[];
   executableSources?: ImportedSource[];
+  disabled?: boolean;
   onConfirm: (source: ImportedSource) => void;
   onDismiss: () => void;
 };
@@ -29,6 +30,7 @@ export default function ScenarioExplorer({
   selectedSource,
   importedSources,
   executableSources = [],
+  disabled = false,
   onConfirm,
   onDismiss,
 }: Props) {
@@ -344,7 +346,7 @@ export default function ScenarioExplorer({
               </p>
               {fileStatus && (
                 <p role="status" className="import-status">
-                  {fileStatus}
+                  {busy && <LoaderCircle size={14} className="scenario-spinner" />} {fileStatus}
                 </p>
               )}
               {fileError && (
@@ -486,7 +488,7 @@ export default function ScenarioExplorer({
         </button>
         <button
           className="run-button"
-          disabled={!pending || busy}
+          disabled={!pending || busy || disabled}
           onClick={() => {
             if (pending && !busy) onConfirm(pending);
           }}

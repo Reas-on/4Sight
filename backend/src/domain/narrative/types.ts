@@ -111,6 +111,8 @@ export interface StoryletDefinition {
   readonly id: string;
   readonly description: string;
   readonly graphNodeId?: string;
+  /** Backend-only rejection routing; never applies the proposed action outcome. */
+  readonly rejectionOutcomeId?: string;
   readonly priority: number;
   readonly oneShot: boolean;
   readonly terminal: boolean;
