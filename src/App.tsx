@@ -49,6 +49,7 @@ import StepView from "./components/StepView";
 import ScenarioExplorer from "./components/ScenarioExplorer";
 import ResultsPanel from "./components/ResultsPanel";
 import { useSimulationRun } from "./hooks/useSimulationRun";
+import { useGraphPlayback } from "./hooks/useGraphPlayback";
 import { useBackendCatalog } from "./hooks/useBackendCatalog";
 import { backendResult, scenarioSources } from "./data/backendPresentation";
 import { dynamicGraph, scenarioMetadata } from "./data/dynamicGraph";
@@ -148,7 +149,7 @@ export default function App() {
     error: runError,
     pending,
     completed,
-    isResultsOpen,
+    isResultsOpen: resultsRequested,
     pause: pauseDemonstration,
     stop: stopDemonstration,
     run: runDemonstration,
@@ -159,8 +160,10 @@ export default function App() {
     clearPresentation,
     liveGraph,
   } = useSimulationRun(input, executionBlock);
-  const projection = useMemo(() => dynamicGraph(metadata, snapshot, events,
-    scenarioLoad === "READY" && !metadata ? workspace.selectedSource ?? undefined : undefined, liveGraph), [metadata, snapshot, events, scenarioLoad, workspace.selectedSource, liveGraph]);
+  const playback = useGraphPlayback(snapshot, events, liveGraph, reduced);
+  const isResultsOpen = resultsRequested && !playback.playing;
+  const projection = useMemo(() => dynamicGraph(metadata, snapshot, playback.events,
+    scenarioLoad === "READY" && !metadata ? workspace.selectedSource ?? undefined : undefined, liveGraph), [metadata, snapshot, playback.events, scenarioLoad, workspace.selectedSource, liveGraph]);
   const graph = projection.dataset;
   const { steps, neighbors, nodeById } = graph;
   const simulationStatus = snapshot?.status ?? "IDLE";
@@ -179,7 +182,8 @@ export default function App() {
     setSelectedAgent(`${providerId}:${snapshot.configuration.modelId ?? ""}`);
   }, [snapshot, executableSources, scenarios]);
   const evaluationResult = backendResult(snapshot, events);
-  const { statuses: nodeStatuses, activeNodeId } = projection;
+  const activeNodeId = playback.activeNodeId ?? projection.activeNodeId;
+  const nodeStatuses = { ...projection.statuses, ...(playback.activeNodeId ? { [playback.activeNodeId]: 'active' as const } : {}) };
   useEffect(() => {
     if (activeNodeId) {
       setSelectedNodeId(activeNodeId);
@@ -757,12 +761,12 @@ export default function App() {
                 isImmersive={isImmersive}
                 reducedMotion={reduced}
                 demoIndex={demoIndex}
-                running={running}
+                running={running || playback.playing}
                 runId={runId ?? ""}
-                executionIdentity={`${runId ?? ""}:${projection.activeSequence}`}
+                executionIdentity={`${runId ?? ""}:${playback.activeSequence ?? projection.activeSequence}`}
                 nodeStatuses={nodeStatuses}
                 activeNodeId={activeNodeId}
-                terminal={snapshot?.status === 'COMPLETED'}
+                terminal={snapshot?.status === 'COMPLETED' && !playback.playing}
                 showContext={showContext}
                 visible={view === "graph"}
               />

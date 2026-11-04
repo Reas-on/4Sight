@@ -237,7 +237,6 @@ const GraphCanvas = memo(
         graphRadius,
       );
       syncDataset.current = (next) => {
-        revealMotion.register(latest.current.graphIdentity ?? '', next.nodes, latest.current.animateNodeIds ?? [], performance.now(), latest.current.reducedMotion);
         if (next === graph) return;
         const ids = new Set(next.nodes.map(node => node.id));
         for (const [id, mesh] of meshes) if (!ids.has(id)) { group.remove(mesh); mesh.material.dispose(); meshes.delete(id); }
@@ -518,6 +517,9 @@ const GraphCanvas = memo(
         // React effects and requestAnimationFrame are independently scheduled.
         // Register the current topology before resolving this frame's focus.
         syncDataset.current(state.dataset ?? legacyGraph);
+        // Start entrances on their first rendered frame, not in a React effect
+        // that may run well before WebGL gets a frame on a busy main thread.
+        revealMotion.register(state.graphIdentity ?? '', graph.nodes, state.animateNodeIds ?? [], now, state.reducedMotion);
         const elapsed = now - state.introStartedAt;
         const blend = 1 - Math.exp(-dt * 7);
         const motion = new Map(graph.nodes.map(node => [node.id, revealMotion.sample(node.id, now, state.reducedMotion)]));

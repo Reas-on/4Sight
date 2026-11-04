@@ -112,6 +112,21 @@ existing edge extending from parent to child and a one-time 8% parent emphasis.
 The shared renderer loop drives motion; replayed/restored nodes do not reanimate,
 reduced motion settles immediately, and large bursts may skip entrances.
 
+Fast committed SSE batches are presented one step per second so the existing
+camera and entrances remain visible even when a fixture finishes before the next
+browser frame. This visual queue never delays execution, SSE ingestion or durable
+evaluation. Results open after visual catch-up; pause/cancel, refresh, reconnect
+and reduced motion bypass playback. Retry starts a new run-scoped queue.
+
+Actual-runtime acceptance (no isolated servers or paid inference): start the
+normal backend with `SIMULATION_MODE=fixture npm --prefix backend run dev`, keep
+the normal frontend at **http://localhost:5173**, then run
+`node e2e/live-runtime.mjs`. It refuses a non-fixture backend, exercises the real
+REST/SSE/PostgreSQL pipeline and captures actual Three.js mesh/edge/camera frames,
+screenshots and run UUIDs under `test-results/live-runtime/`. On NixOS, use the
+existing compatible browser executable/runtime environment. Fixture mode is
+explicit and labeled; restart the backend normally to restore configured Gemini.
+
 Rule Adherence uses one shared domain calculation for REST and Results:
 approved / evaluated × 100. Numeric zero remains 0%; zero evaluations is N/A;
 missing/inconsistent evidence is Unavailable. `PROVIDER_RATE_LIMITED` before a

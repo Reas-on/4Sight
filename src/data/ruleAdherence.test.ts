@@ -3,7 +3,7 @@ import { ruleAdherence } from '../../backend/src/domain/simulation/rule-adherenc
 import { backendResult } from './backendPresentation';
 import { runFixture } from '../api/testFixtures';
 
-it.each([[1, 1, 0, 100], [2, 1, 1, 50], [3, 0, 3, 0], [0, 0, 0, null]])('measures %i evaluated / %i approved / %i rejected', (total, approved, rejected, expected) => {
+it.each([[1, 1, 0, 100], [2, 1, 1, 50], [1, 0, 1, 0], [3, 0, 3, 0], [0, 0, 0, null]])('measures %i evaluated / %i approved / %i rejected', (total, approved, rejected, expected) => {
   expect(ruleAdherence({ totalDecisions: total!, approvedDecisions: approved!, rejectedDecisions: rejected! })).toBe(expected);
 });
 it('never treats missing/corrupt evidence as a zero-decision result or 100%', () => {
