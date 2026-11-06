@@ -108,6 +108,10 @@ export default function App() {
   const { scenarios, models, catalogError, loading } = useBackendCatalog();
   const executableSources = useMemo(() => scenarioSources(scenarios), [scenarios]);
   const modelKey = (model: { providerId: string; modelId: string | null }) => `${model.providerId}:${model.modelId ?? ""}`;
+  const modelLabel = (model: { providerId: string; modelId: string | null }) => model.providerId === "fixture"
+    ? "Backend fixture · simulated"
+    : model.providerId === "modelapi-gpt" ? `GPT-6.1 Sol · ${model.modelId ?? "not configured"}`
+    : `${model.providerId} · ${model.modelId ?? "not configured"}`;
   const [workspace, setWorkspace] = useState<ScenarioWorkspace>({
     selectedSource: null,
     additionalContext: "",
@@ -495,7 +499,7 @@ export default function App() {
                 <div className="select-wrap">
                   <Sparkles size={15} />
                   <span className="agent-select-value" aria-hidden="true">
-                    {selectedModel ? `${selectedModel.providerId === "fixture" ? "Backend fixture · simulated" : selectedModel.providerId} ${selectedModel.modelId ?? ""}` : "No model connected"}
+                    {selectedModel ? modelLabel(selectedModel) : "No model connected"}
                   </span>
                   <select
                     id="agent-model"
@@ -508,7 +512,7 @@ export default function App() {
                   >
                     <option value="">No model connected</option>
                     {models.map((model) => <option key={modelKey(model)} value={modelKey(model)} disabled={!model.configured}>
-                      {model.providerId === "fixture" ? "Backend fixture · simulated" : `${model.providerId} · ${model.modelId ?? "not configured"}`}
+                      {modelLabel(model)}
                     </option>)}
                   </select>
                   <ChevronDown size={13} />

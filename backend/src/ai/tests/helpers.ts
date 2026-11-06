@@ -26,6 +26,13 @@ export function geminiResponse(output: unknown = validOutput): Response {
   });
 }
 
+export function modelapiResponse(output: unknown = validOutput): Response {
+  return Response.json({ id: 'chatcmpl-test', object: 'chat.completion', model: 'gpt-6.1-sol',
+    choices: [{ index: 0, finish_reason: 'stop', message: {
+      role: 'assistant', content: JSON.stringify(output), reasoning_content: 'private reasoning',
+    } }], usage: { prompt_tokens: 831, completion_tokens: 38, total_tokens: 869 } });
+}
+
 export function ollamaResponse(output: unknown = validOutput): Response {
   return Response.json({ model: 'test-model', done: true, done_reason: 'stop', message: {
     role: 'assistant', content: JSON.stringify(output),

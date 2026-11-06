@@ -1,0 +1,303 @@
+[
+  {
+    "label": "beginner-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:29:15.651Z",
+    "id": "beef7501-550b-4b64-aae5-a2d7f0489c23",
+    "elapsedMs": 11951,
+    "scenario": "ssh-login-investigation-beginner",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "PASS",
+    "error": null,
+    "version": 8,
+    "decisions": 1,
+    "verdicts": [
+      "APPROVED"
+    ],
+    "adherence": 100,
+    "nodes": 8,
+    "path": [
+      "N-01",
+      "N-02",
+      "N-03",
+      "N-04",
+      "N-06",
+      "N-07",
+      "N-08",
+      "N-09"
+    ],
+    "eventCount": 30,
+    "ordered": true,
+    "responseStatus": "blocked",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  },
+  {
+    "label": "beginner-internal-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:29:28.648Z",
+    "id": "e99abda6-5060-4bf1-8436-0d1372aa6a92",
+    "elapsedMs": 9619,
+    "scenario": "ssh-login-investigation-beginner",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "PASS",
+    "error": null,
+    "version": 8,
+    "decisions": 1,
+    "verdicts": [
+      "APPROVED"
+    ],
+    "adherence": 100,
+    "nodes": 8,
+    "path": [
+      "N-01",
+      "N-02",
+      "N-03",
+      "N-05",
+      "N-06",
+      "N-07",
+      "N-08",
+      "N-09"
+    ],
+    "eventCount": 30,
+    "ordered": true,
+    "responseStatus": "escalated",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  },
+  {
+    "label": "ssh-external-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:29:58.216Z",
+    "id": "3be2e604-7b0f-4f9b-bb53-08e56c2f5251",
+    "elapsedMs": 26088,
+    "scenario": "ssh-brute-force",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "PASS",
+    "error": null,
+    "version": 3,
+    "decisions": 3,
+    "verdicts": [
+      "APPROVED",
+      "APPROVED",
+      "APPROVED"
+    ],
+    "adherence": 100,
+    "nodes": 3,
+    "path": [
+      "N-01",
+      "N-04",
+      "N-05"
+    ],
+    "eventCount": 16,
+    "ordered": true,
+    "responseStatus": "resolved",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 2,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 3,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  },
+  {
+    "label": "ssh-internal-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:30:32.274Z",
+    "id": "442a6299-e8ab-493f-8e58-a4dd0eae4088",
+    "elapsedMs": 30899,
+    "scenario": "ssh-brute-force",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "PASS",
+    "error": null,
+    "version": 4,
+    "decisions": 4,
+    "verdicts": [
+      "APPROVED",
+      "APPROVED",
+      "APPROVED",
+      "APPROVED"
+    ],
+    "adherence": 100,
+    "nodes": 3,
+    "path": [
+      "N-01",
+      "N-04",
+      "N-04",
+      "N-05"
+    ],
+    "eventCount": 20,
+    "ordered": true,
+    "responseStatus": "resolved",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 2,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 3,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 4,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  },
+  {
+    "label": "branch-decline-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:31:23.782Z",
+    "id": "8570f995-9854-49b7-b8ed-3cf0acb5666a",
+    "elapsedMs": 46556,
+    "scenario": "policy-rejection-branches",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "FAIL",
+    "error": null,
+    "version": 4,
+    "decisions": 4,
+    "verdicts": [
+      "APPROVED",
+      "REJECTED",
+      "APPROVED",
+      "APPROVED"
+    ],
+    "adherence": 75,
+    "nodes": 5,
+    "path": [
+      "N-01",
+      "N-02",
+      "N-03",
+      "N-05"
+    ],
+    "eventCount": 20,
+    "ordered": true,
+    "responseStatus": "none",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 2,
+        "verdict": "REJECTED",
+        "transition": null
+      },
+      {
+        "sequence": 3,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 4,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  },
+  {
+    "label": "branch-live",
+    "mode": "ai",
+    "at": "2026-11-06T15:32:28.336Z",
+    "id": "d7c41234-e340-4590-bc8b-10109d1dcdc0",
+    "elapsedMs": 61622,
+    "scenario": "policy-rejection-branches",
+    "provider": "modelapi-gpt",
+    "model": "gpt-6.1-sol",
+    "status": "COMPLETED",
+    "outcome": "FAIL",
+    "error": null,
+    "version": 4,
+    "decisions": 4,
+    "verdicts": [
+      "APPROVED",
+      "REJECTED",
+      "APPROVED",
+      "APPROVED"
+    ],
+    "adherence": 75,
+    "nodes": 5,
+    "path": [
+      "N-01",
+      "N-02",
+      "N-03",
+      "N-04"
+    ],
+    "eventCount": 20,
+    "ordered": true,
+    "responseStatus": "none",
+    "records": [
+      {
+        "sequence": 1,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 2,
+        "verdict": "REJECTED",
+        "transition": null
+      },
+      {
+        "sequence": 3,
+        "verdict": "APPROVED",
+        "transition": null
+      },
+      {
+        "sequence": 4,
+        "verdict": "APPROVED",
+        "transition": null
+      }
+    ],
+    "errors": [],
+    "restoredSameId": true
+  }
+]

@@ -1,7 +1,7 @@
 import fp from 'fastify-plugin';
 import type { Env } from '../config/env.js';
 import { loadAiConfig } from '../config/env.js';
-import { createConfiguredProvider } from '../ai/provider-registry.js';
+import { createConfiguredProvider, createSelectedProvider, listProviderModels } from '../ai/provider-registry.js';
 import { createBeginnerFixtureProvider, createBranchFixtureProvider, createExternalSourceProvider, createProtectedInternalProvider } from '../domain/simulation/fixtures.js';
 import { BRANCH_SCENARIO_ID } from '../domain/narrative/scenarios/policy-branch.js';
 import { BEGINNER_SCENARIO_ID } from '../domain/narrative/scenarios/ssh-beginner.js';
@@ -38,15 +38,16 @@ export const simulationPlugin = fp<SimulationPluginOptions>(async (app, { env, p
     ? (variant, scenarioId) => scenarioId === BEGINNER_SCENARIO_ID ? createBeginnerFixtureProvider()
       : scenarioId === BRANCH_SCENARIO_ID ? createBranchFixtureProvider()
       : variant === 'externalSource' ? createExternalSourceProvider() : createProtectedInternalProvider()
-    : () => createConfiguredProvider(ai));
+    : (_variant, _scenarioId, selection) => selection
+      ? createSelectedProvider(ai, selection.providerId)
+      : createConfiguredProvider(ai));
   service = new SimulationService(repository, factory, (code) => app.log.error({ code }, 'simulation worker failed'));
   await app.register(simulationRoutes, {
     service,
     ...(env.SIMULATION_ACCESS_TOKEN ? { accessToken: env.SIMULATION_ACCESS_TOKEN } : {}),
     ...(env.SIMULATION_ALLOWED_ORIGIN ? { allowedOrigin: env.SIMULATION_ALLOWED_ORIGIN } : {}),
     models: () => fixtureMode ? [{ providerId: 'fixture', modelId: null, configured: true }]
-      : [{ providerId: ai.provider ?? 'unconfigured', modelId: (ai.provider === 'gemini' ? ai.geminiModel : ai.ollamaModel) ?? null,
-        configured: Boolean(ai.provider && (ai.provider === 'gemini' ? ai.geminiApiKey && ai.geminiModel : ai.ollamaModel)) }],
+      : listProviderModels(ai),
   });
   app.addHook('onReady', async () => {
     await transactions.acquire();

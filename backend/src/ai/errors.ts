@@ -54,6 +54,24 @@ export function retryAfterMilliseconds(value: string | null): number | undefined
   return Number.isFinite(delay) && delay >= 0 ? Math.ceil(delay) : undefined;
 }
 
+export function modelApiHttpError(status: number, body: string, retryAfterMs?: number): AiProviderError {
+  let payload: unknown;
+  try { payload = JSON.parse(body); } catch { return httpProviderError(status, retryAfterMs); }
+  if (typeof payload === 'object' && payload !== null && 'error' in payload &&
+      typeof payload.error === 'object' && payload.error !== null) {
+    const error = payload.error as { code?: unknown; message?: unknown };
+    const code = typeof error.code === 'string' ? error.code.toLowerCase() : '';
+    const message = typeof error.message === 'string' ? error.message : '';
+    if (code === 'model_not_found' || /no available channel for model/i.test(message)) {
+      return new AiProviderError('MODEL_NOT_FOUND');
+    }
+    if (['invalid_api_key', 'authentication_error', 'permission_denied'].includes(code)) {
+      return new AiProviderError('PROVIDER_AUTH_ERROR');
+    }
+  }
+  return httpProviderError(status, retryAfterMs);
+}
+
 export function geminiHttpError(status: number, body: string, retryAfterMs?: number): AiProviderError {
   let payload: unknown;
   try { payload = JSON.parse(body); } catch { return httpProviderError(status, retryAfterMs); }

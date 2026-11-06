@@ -18,7 +18,7 @@ paths through the existing Vite proxy to `http://127.0.0.1:3001`. The proxy pres
 the browser's Host and Origin; the backend validates the exact configured origin.
 `http://127.0.0.1:5173` is a different origin and is rejected unless explicitly
 configured instead. Restart the backend after changing its environment, including
-any launch-time `SIMULATION_ALLOWED_ORIGIN` override. Keep Gemini credentials only
+any launch-time `SIMULATION_ALLOWED_ORIGIN` override. Keep provider credentials only
 in the ignored backend environment. Run cookies remain HttpOnly, SameSite=Strict
 and scoped to `/api/v1/runs/<run UUID>`; HTTP localhost does not use Secure cookies.
 
@@ -125,7 +125,7 @@ the normal frontend at **http://localhost:5173**, then run
 REST/SSE/PostgreSQL pipeline and captures actual Three.js mesh/edge/camera frames,
 screenshots and run UUIDs under `test-results/live-runtime/`. On NixOS, use the
 existing compatible browser executable/runtime environment. Fixture mode is
-explicit and labeled; restart the backend normally to restore configured Gemini.
+explicit and labeled; restart the backend normally to restore the configured AI provider.
 
 Rule Adherence uses one shared domain calculation for REST and Results:
 approved / evaluated × 100. Numeric zero remains 0%; zero evaluations is N/A;
@@ -347,15 +347,18 @@ Run `npm run typecheck`, `npm run build`, and `npm test` in `backend/` to verify
 
 Historical milestone reference: **2026-09-24T12:00:00+07:00** (user-specified planning metadata, not the implementation, commit, or push date).
 
-`backend/src/ai/` provides Gemini through Google's official `@google/genai` SDK and Ollama through `POST /api/chat`. Both implement the existing `DecisionProvider.decide(context)` contract. The registry selects one explicit provider for a run, with no fallback or model discovery. Phase 2 scripted providers remain available for deterministic tests.
+`backend/src/ai/` provides GPT-6.1 Sol through ModelAPI's OpenAI-compatible `POST /v1/chat/completions`, Gemini through Google's official `@google/genai` SDK, and Ollama through `POST /api/chat`. All implement the existing `DecisionProvider.decide(context)` contract. The registry exposes each supported provider with a configured flag and binds the user's selected provider/model to the run, with no fallback or model discovery. Phase 2 scripted providers remain available for deterministic tests.
 
 ### Configuration and usage
 
-Copy the AI placeholders from `.env.example` into your untracked `.env`, or supply them through the backend process environment. `loadAiConfig()` uses the existing dotenv search/precedence without requiring a database connection. Only the selected provider needs credentials/model configuration.
+Copy the AI placeholders from `.env.example` into your untracked `.env`, or supply them through the backend process environment. `loadAiConfig()` uses the existing dotenv search/precedence without requiring a database connection. Only providers you want to remain selectable need credentials/model configuration.
 
 | Variable | Meaning |
 | --- | --- |
-| `AI_PROVIDER` | Explicitly `gemini` or `ollama`; blank/unset means unconfigured |
+| `AI_PROVIDER` | Default provider: `modelapi-gpt`, `gemini`, or `ollama`; blank/unset means unconfigured |
+| `MODELAPI_API_KEY` | Server-side ModelAPI credential for GPT-6.1 Sol |
+| `MODELAPI_MODEL` | ModelAPI model ID, default `gpt-6.1-sol` |
+| `MODELAPI_REASONING_EFFORT` | `low`, `medium`, `high`, or `xhigh`; default `xhigh` |
 | `GEMINI_API_KEY` | Server-side Gemini Developer API key |
 | `GEMINI_MODEL` | Explicit supported model ID; no assumed model default |
 | `OLLAMA_BASE_URL` | Trusted backend-configured HTTP(S) origin; default `http://127.0.0.1:11434` |
@@ -391,16 +394,16 @@ Ollama must already be running with the configured model installed. Keep it loop
 
 The model supplies only `actionType`, required `parameters` (possibly `{}`), `storyletId`, `outcomeId`, and optional `reasoning`. The normalizer supplies backend-generated decision IDs and the selected provider ID, then invokes the existing Phase 2 validator. Missing required model fields, unknown/extra fields (including verdicts, effects, scores, state versions, and audit events), non-JSON/markdown, truncated responses, and tool-call responses are rejected. There is no output repair, coercion, or invented decision content.
 
-The prompt contains separate system instructions and a bounded JSON data message: backend state/opportunity IDs are distinguished from untrusted scenario descriptions and Additional Context. It excludes state effects, previous raw responses, credentials, and backend environment dumps. Known configured Gemini keys and common credential patterns are redacted from scenario text before transmission. Arbitrary text cannot be comprehensively classified as secret; only submit scenario data intended for the selected provider. Full prompts/responses and raw upstream errors are never logged by the adapters. Normalized errors contain fixed messages; the API logger also redacts common credential/prompt fields.
+The prompt contains separate system instructions and a bounded JSON data message: backend state/opportunity IDs are distinguished from untrusted scenario descriptions and Additional Context. It excludes state effects, previous raw responses, credentials, and backend environment dumps. Known configured provider keys and common credential patterns are redacted from scenario text before transmission. Arbitrary text cannot be comprehensively classified as secret; only submit scenario data intended for the selected provider. Full prompts/responses and raw upstream errors are never logged by the adapters. Normalized errors contain fixed messages; the API logger also redacts common credential/prompt fields.
 
-Gemini's service origin is fixed; Ollama's origin comes only from trusted backend configuration. Endpoint URLs with credentials, query strings, fragments, or non-root paths are rejected. Redirects are disabled. Scenario text and model output cannot choose the URL or model. No tools, shell commands, firewall actions, host actions, or SOAR calls are executed.
+ModelAPI's service origin/path and Gemini's service origin are fixed; Ollama's origin comes only from trusted backend configuration. Endpoint URLs with credentials, query strings, fragments, or unexpected paths are rejected. Redirects are disabled. Scenario text and model output cannot choose the URL or model. No tools, shell commands, firewall actions, host actions, or SOAR calls are executed.
 
 Structured JSON is still just a proposal: the unchanged Referee policies remain authoritative. A schema-valid protected-source block is recorded as a rejection with evidence; no rejected effects are committed. Invalid output is recorded as a provider error with an `INCONCLUSIVE` evaluation and no invented approved-decision record.
 
 ### Resource limits, retry, and cancellation
 
 - Prompt data: at most 32 KiB UTF-8; complete transport response: at most 64 KiB before JSON parsing; decision text: at most 16 KiB; generated output: at most 2,048 tokens.
-- Both providers request schema-constrained, non-streaming JSON. A reduced Gemini-supported JSON Schema is derived from the runtime decision schema; the full TypeBox constraints are still enforced locally.
+- All providers request non-streaming JSON. Gemini uses a reduced provider-supported JSON Schema; GPT-6.1 Sol uses `response_format: { type: "json_object" }` because ModelAPI rejects the optional-parameter schema under strict JSON Schema. The full TypeBox and Referee constraints are always enforced locally.
 - Only unavailability, timeout, and rate limiting are retried. Backoff is exponential (`250ms`, `500ms`, `1000ms` for up to three retries), honoring larger retry hints when the total budget permits. The total budget is `(retries + 1) × request timeout + retries × 2000ms`. An excessive retry hint ends the request rather than sleeping beyond the budget. Auth errors, missing models, invalid output, oversize responses, and configuration/request errors are not retried.
 - Gemini SDK retries and automatic continuation are disabled so one pipeline attempt cannot multiply into hidden calls. Retrying inference is safe only in the sense that this pipeline executes no actions; timed-out remote generations may still consume provider resources or incur charges.
 - Abort signals interrupt active work and retry sleeps. Timeout/cancel races are bounded even if a transport ignores the signal. The existing orchestrator generation checks prevent stale responses after pause, resume, or cancellation from committing state.
@@ -420,11 +423,11 @@ npm run ai:smoke -- --live
 
 The test suite injects mocked HTTP transport, including the official SDK's fetch hook; it makes no inference calls. The explicitly invoked smoke script makes **at most one inference request**, with retries disabled, using the selected configured provider. It validates the result, runs the Referee, prints only safe provenance/status evidence, and commits no effects. `PASS` means an actual inference returned schema-valid output; the Referee verdict is reported separately. Exit code `2` indicates a blocked prerequisite, `1` indicates a failed check, and `0` indicates successful inference/validation.
 
-During this implementation's explicit smoke invocation, the result was **`BLOCKED: PROVIDER_NOT_CONFIGURED`**: no selected provider, Gemini credential/model, or Ollama model was configured in the process/local environment. No live inference request was sent. Real-provider acceptance remains pending configuration and a successful invocation of the command above.
+Migration acceptance on 2026-11-06 produced a live GPT-6.1 Sol `PASS` through this command: ModelAPI returned schema-valid output, the Referee approved it, and no effects were committed. The ModelAPI credential was supplied transiently and is not stored in the repository.
 
 ### Current scope
 
-Phases 0–3 are implemented, with live inference acceptance blocked as documented above. Phase 4 persistence/transport is described below. SOAR execution and frontend integration remain deferred.
+Phases 0–3 are implemented, with live GPT-6.1 Sol inference accepted as documented above. Phase 4 persistence/transport is described below. SOAR execution and frontend integration remain deferred.
 
 ## Durable runs, REST and SSE (Phase 4)
 
@@ -523,7 +526,7 @@ Run creation accepts optional `providerId`/`modelId` selection and `additionalCo
 
 One subscription per run enforces sequence order and duplicate protection, reconnects with its last processed cursor, and reconciles snapshots independently every two seconds during execution/recovery. Snapshot revisions prevent stale responses from reverting state. Retry creates a fresh UUID and detaches the old subscription; cancelled/old-run events cannot reactivate progress. Results preserve execution status separately from policy outcome, show `N/A` hallucination measurement, and distinguish skipped/not-evaluated nodes. Original canvas positions, camera controller, layout and CSS are preserved.
 
-Focused checks: root `npm run build`; `npm test -- src/hooks/useSimulationRun.test.tsx src/api/events.test.ts src/components/ResultsPanel.integration.test.tsx`; and `npm run test:phase5` for the real API/PostgreSQL/browser flow. The dedicated browser configuration starts an explicitly test-only delayed fixture API, including a protected-source rejection path; it does not call live AI. After backend schema changes run `npm --prefix backend run api:contract` and commit the generated contract. Live inference remains blocked until a provider/model is configured. Arbitrary imported scenario execution, arbitrary Additional Context mapping, public multi-user authentication, and SOAR export remain unsupported.
+Focused checks: root `npm run build`; `npm test -- src/hooks/useSimulationRun.test.tsx src/api/events.test.ts src/components/ResultsPanel.integration.test.tsx`; and `npm run test:phase5` for the real API/PostgreSQL/browser flow. The dedicated browser configuration starts an explicitly test-only delayed fixture API, including a protected-source rejection path; it does not call live AI. After backend schema changes run `npm --prefix backend run api:contract` and commit the generated contract. Live inference is accepted for GPT-6.1 Sol in the migration run; focused checks still use fixtures and never call live AI. Arbitrary imported scenario execution, arbitrary Additional Context mapping, public multi-user authentication, and SOAR export remain unsupported.
 
 ## Security and reliability acceptance (Phase 6)
 
@@ -540,7 +543,7 @@ Audit classifications describe the inspected implementation, not a public-deploy
 | Transaction/audit integrity | **VERIFIED SAFE + strengthened:** row-lock/revision/unique-constraint protections and atomic rollback retained. Evaluation now checks decision/Referee/transition identity, sequential versions and meaningful terminal evidence; persisted reads reject evaluation/count/version inconsistency rather than serving fabricated PASS. |
 | Restart/readiness | **PARTIAL → fixed:** readiness formerly checked only a separate pool connection. It now checks the exclusive executor too; losing that session aborts execution, fences writes and makes `/ready` return 503. Single-instance ownership, startup recovery, cancellation and graceful cleanup are exercised with real PostgreSQL, including an abruptly exited child executor. |
 | Frontend replay/results | **VERIFIED SAFE** in targeted tests: ordered/deduplicated SSE, snapshot reconciliation, run-generation cancellation and refresh recovery; FAIL/INCONCLUSIVE stay separate from execution status and hallucination remains N/A. UI/CSS are unchanged. |
-| Live inference | **UNVERIFIED / BLOCKED:** no configured Gemini/Ollama provider/model; explicit smoke reports `PROVIDER_NOT_CONFIGURED`, not PASS. No live inference call was made. |
+| Live inference | **VERIFIED for GPT-6.1 Sol:** live smoke passed, all six browser selections completed with the same outcomes as the Gemini baseline, and the injected rate-limit path failed closed with zero decisions. Gemini remains selectable; Ollama behavior is unchanged. |
 
 Run migration and targeted acceptance from `backend/`: `npm run db:migrate`, `npm run typecheck`, `npm run build`, `npm run test:security`. These tests reuse the real PostgreSQL rollback/concurrency/SSE/cancellation/restart cases and add cookie cross-run/expiry/CSRF, resource bounds, prompt forgery, evaluation integrity, and executor-loss injection. Database integration uses the existing opt-in development-test flag; it does not expose failure endpoints. Clean-database migration plus idempotent reapplication was also checked separately.
 

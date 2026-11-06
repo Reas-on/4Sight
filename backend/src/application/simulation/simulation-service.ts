@@ -12,7 +12,13 @@ import type { DecisionProvider } from '../../domain/simulation/types.js';
 import { ApplicationError, type DurableRun, type SimulationRepository } from './contracts.js';
 
 export type InitialVariant = 'externalSource' | 'protectedInternalSource';
-export type ProviderFactory = (variant: InitialVariant, scenarioId?: string) => DecisionProvider;
+export interface ProviderSelection {
+  readonly providerId: string;
+  readonly modelId: string | null;
+  readonly additionalContext?: string;
+}
+
+export type ProviderFactory = (variant: InitialVariant, scenarioId?: string, selection?: ProviderSelection) => DecisionProvider;
 
 export class SimulationService {
   private readonly workers = new Map<string, { controller: AbortController; task: Promise<void> }>();
@@ -26,21 +32,21 @@ export class SimulationService {
     private readonly reportFailure: (code: string) => void = () => undefined) {}
 
   create(scenarioId: string, initialVariant: InitialVariant,
-    selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
+    selection?: ProviderSelection): Promise<{ run: DurableRun; accessToken: string }> {
     const task = this.createRun(scenarioId, initialVariant, selection);
     this.creations.add(task);
     return task.finally(() => this.creations.delete(task));
   }
 
   private async createRun(scenarioId: string, initialVariant: InitialVariant,
-    selection?: { providerId: string; modelId: string | null; additionalContext?: string }): Promise<{ run: DurableRun; accessToken: string }> {
+    selection?: ProviderSelection): Promise<{ run: DurableRun; accessToken: string }> {
     const entry = scenarioRegistry.find(item => item.scenario.id === scenarioId);
     if (!entry) throw new ApplicationError('SCENARIO_NOT_FOUND', 404);
     const { scenario } = entry;
     this.checkCapacity();
     this.reservations += 1;
     try {
-      const provider = this.providerFactory(initialVariant, scenario.id);
+      const provider = this.providerFactory(initialVariant, scenario.id, selection);
       if (selection?.additionalContext?.trim()) throw new ApplicationError('UNSUPPORTED_ADDITIONAL_CONTEXT', 400);
       const selectedProvider = provider.id.startsWith('fixture-') ? 'fixture' : provider.id;
       if (selection && (selection.providerId !== selectedProvider || selection.modelId !== (provider.provenance?.model ?? null))) {
@@ -92,7 +98,9 @@ export class SimulationService {
         const previous = await this.repository.read(id);
         try { assertLifecycleTransition(previous.status, 'resume'); }
         catch { throw new ApplicationError('INVALID_LIFECYCLE_TRANSITION', 409); }
-        provider = this.providerFactory(previous.configuration.initialVariant, previous.configuration.scenario.id);
+        provider = this.providerFactory(previous.configuration.initialVariant, previous.configuration.scenario.id, {
+          providerId: previous.configuration.providerId, modelId: previous.configuration.modelId,
+        });
         if (provider.id !== previous.configuration.providerId ||
             (provider.provenance?.model ?? null) !== previous.configuration.modelId) {
           throw new ApplicationError('PROVIDER_CONFIGURATION_CHANGED', 409);

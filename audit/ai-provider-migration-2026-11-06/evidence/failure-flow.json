@@ -1,0 +1,90 @@
+{
+  "id": "179113df-cc8e-49a5-80bb-2248bb0f47b7",
+  "status": "FAILED",
+  "outcome": "INCONCLUSIVE",
+  "error": {
+    "code": "PROVIDER_RATE_LIMITED",
+    "message": "Simulation execution failed.",
+    "phase": "provider"
+  },
+  "records": 0,
+  "nodeStatuses": [
+    {
+      "id": "N-01",
+      "status": "APPROVED"
+    },
+    {
+      "id": "N-02",
+      "status": "APPROVED"
+    },
+    {
+      "id": "N-03",
+      "status": "APPROVED"
+    },
+    {
+      "id": "N-04",
+      "status": "RUNNING"
+    }
+  ],
+  "labels": [
+    {
+      "text": "1. Alert arrivesN-01 · Passed",
+      "status": "complete"
+    },
+    {
+      "text": "2. Collect factsN-02 · Passed",
+      "status": "complete"
+    },
+    {
+      "text": "3. Check sourceN-03 · Passed",
+      "status": "complete"
+    },
+    {
+      "text": "4A. Propose IP blockN-04 · Execution failed",
+      "status": "failed"
+    }
+  ],
+  "result": {
+    "evaluation": {
+      "runId": "179113df-cc8e-49a5-80bb-2248bb0f47b7",
+      "scenarioId": "ssh-login-investigation-beginner",
+      "providerProvenance": {
+        "provider": "modelapi-gpt",
+        "model": "gpt-6.1-sol"
+      },
+      "status": "FAILED",
+      "outcome": "INCONCLUSIVE",
+      "reasonCode": "PROVIDER_RATE_LIMITED",
+      "summary": "PROVIDER_RATE_LIMITED",
+      "terminal": false,
+      "totalDecisions": 0,
+      "approvedDecisions": 0,
+      "rejectedDecisions": 0,
+      "policyViolations": [],
+      "finalStateVersion": 3,
+      "finalWorld": {
+        "sourceClassification": "external",
+        "sourceProtected": false,
+        "assetClassification": "server",
+        "assetProtected": false,
+        "threatConfidence": 93,
+        "incidentStatus": "triaged",
+        "escalationStatus": "not_required",
+        "responseStatus": "none",
+        "escalationAttempts": 0,
+        "completedEvents": [
+          "event:beginner-alert",
+          "event:beginner-facts",
+          "event:beginner-source"
+        ],
+        "workflowStage": 3
+      },
+      "startedAt": "2026-11-06 15:32:50.485+00",
+      "completedAt": "2026-11-06T15:32:52.053Z",
+      "policySetId": "4sight-default-referee",
+      "policySetVersion": "1.0.0"
+    },
+    "ruleAdherence": null
+  },
+  "errors": []
+}

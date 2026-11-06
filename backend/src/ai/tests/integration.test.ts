@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { sshBruteForceInitialStates, sshBruteForceScenario } from '../../domain/narrative/scenarios/ssh-brute-force.js';
 import { InMemorySimulationOrchestrator } from '../../domain/simulation/orchestrator.js';
 import { parseAiConfig, validateOllamaUrl } from '../config.js';
-import { createConfiguredProvider } from '../provider-registry.js';
+import { createConfiguredProvider, createSelectedProvider, listProviderModels } from '../provider-registry.js';
 import { buildDecisionPrompt } from '../prompt.js';
 import { MAX_CONTEXT_BYTES, type AiConfig } from '../types.js';
 import { context, deferred, ollamaResponse, validOutput } from './helpers.js';
@@ -24,6 +24,7 @@ describe('AI configuration and deterministic referee boundary', () => {
 
   it.each([
     { AI_PROVIDER: 'auto' }, { AI_MAX_RETRIES: '10' }, { AI_REQUEST_TIMEOUT_MS: 'Infinity' },
+    { MODELAPI_REASONING_EFFORT: 'maximum' },
   ])('rejects invalid backend configuration', (source) => {
     expect(() => parseAiConfig(source)).toThrow(expect.objectContaining({ code: 'PROVIDER_CONFIG_ERROR' }));
   });
@@ -32,6 +33,20 @@ describe('AI configuration and deterministic referee boundary', () => {
     ('rejects unsafe or ambiguous endpoint configuration %s', (url) => {
       expect(() => validateOllamaUrl(url)).toThrow(expect.objectContaining({ code: 'PROVIDER_CONFIG_ERROR' }));
     });
+
+  it('configures GPT-6.1 Sol through the verified ModelAPI provider and lists it first', () => {
+    const parsed = parseAiConfig({ MODELAPI_API_KEY: 'test-modelapi-key' });
+    expect(parsed).toMatchObject({ modelapiModel: 'gpt-6.1-sol', modelapiReasoningEffort: 'xhigh' });
+    expect(createSelectedProvider(parsed, 'modelapi-gpt').provenance)
+      .toEqual({ provider: 'modelapi-gpt', model: 'gpt-6.1-sol' });
+    expect(listProviderModels(parsed)).toEqual([
+      { providerId: 'modelapi-gpt', modelId: 'gpt-6.1-sol', configured: true },
+      { providerId: 'gemini', modelId: null, configured: false },
+      { providerId: 'ollama', modelId: null, configured: false },
+    ]);
+    expect(() => createConfiguredProvider(parseAiConfig({ AI_PROVIDER: 'modelapi-gpt' })))
+      .toThrow(expect.objectContaining({ code: 'PROVIDER_NOT_CONFIGURED' }));
+  });
 
   it('requires an explicit valid model without guessing or auto-discovery', () => {
     expect(() => createConfiguredProvider({ ...config, ollamaModel: '' })).toThrow(expect.objectContaining({ code: 'PROVIDER_NOT_CONFIGURED' }));

@@ -1,6 +1,7 @@
 import type { DecisionProvider } from '../domain/simulation/types.js';
 
-export type AiProviderName = 'gemini' | 'ollama';
+export type AiProviderName = 'gemini' | 'ollama' | 'modelapi-gpt';
+export type ModelApiReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface AiConfig {
   readonly provider?: AiProviderName;
@@ -8,6 +9,9 @@ export interface AiConfig {
   readonly geminiModel?: string;
   readonly ollamaBaseUrl: string;
   readonly ollamaModel?: string;
+  readonly modelapiApiKey?: string;
+  readonly modelapiModel?: string;
+  readonly modelapiReasoningEffort?: ModelApiReasoningEffort;
   readonly requestTimeoutMs: number;
   readonly maxRetries: number;
 }
